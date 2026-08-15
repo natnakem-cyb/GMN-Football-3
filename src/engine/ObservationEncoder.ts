@@ -1,6 +1,9 @@
 import { Ball, GameMode, MatchScore, Player, RLObservation, TeamSide } from '../types/football';
 import { PITCH } from './Rules';
 import { Vec2 } from './Vector';
+import { OBSERVATION_DIM, OBSERVATION_SCHEMA_VERSION } from './Contract';
+
+export { OBSERVATION_DIM, OBSERVATION_SCHEMA_VERSION };
 
 export class ObservationEncoder {
   /**
@@ -123,6 +126,12 @@ export class ObservationEncoder {
     ];
     for (const mode of modeIndices) {
       rawVector.push(gameMode === mode ? 1.0 : 0.0);
+    }
+
+    if (rawVector.length !== OBSERVATION_DIM) {
+      throw new Error(
+        `[ObservationEncoder Contract Violation] Encoded vector length mismatch: expected ${OBSERVATION_DIM}, got ${rawVector.length}`
+      );
     }
 
     return {

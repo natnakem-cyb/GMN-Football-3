@@ -1,7 +1,7 @@
 {
-  "name": "google-research-football-web",
+  "name": "gmn-football-3",
   "private": true,
-  "version": "1.0.0",
+  "version": "3.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
@@ -10,7 +10,12 @@
     "preview": "vite preview --port 3000",
     "bridge": "tsx training/bridge_server.ts",
     "headless": "tsx training/benchmark.ts",
+    "benchmark": "tsx training/benchmark.ts",
+    "benchmark:bridge": "python3 training/benchmark_bridge.py",
+    "test": "tsx training/test_scenarios.ts && tsx training/test_determinism.ts",
+    "test:scenarios": "tsx training/test_scenarios.ts",
     "test:determinism": "tsx training/test_determinism.ts",
+    "test:e2e": "python3 training/test_e2e_determinism.py",
     "test:env": "python3 training/test_env.py",
     "test:ppo": "python3 training/train_ppo.py 1000",
     "test:audit": "tsx training/audit_observations_and_actions.ts",

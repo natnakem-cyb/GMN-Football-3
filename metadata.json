@@ -1,6 +1,6 @@
 {
   "name": "Google Research Football Web Playground",
-  "description": "Interactive web simulation, AI agent arena, replay analyzer, and scenario builder for Google Research Football.",
+  "description": "GMN-Football-3: Browser-native football simulation with shared TypeScript engine, headless RL HTTP bridge, Gymnasium environment, and PPO training.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

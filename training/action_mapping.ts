@@ -1,36 +1,44 @@
 import { ActionType, AgentAction, Vector2D } from '../src/types/football';
+import { ACTION_SPACE_SIZE, ACTION_SCHEMA_VERSION } from '../src/engine/Contract';
+
+export { ACTION_SPACE_SIZE, ACTION_SCHEMA_VERSION };
 
 /**
- * Standard Discrete Action Space Mapping for GMN-Football RL Environment.
- * Size: Discrete(19) matching Google Research Football (GRF) 19-action set.
+ * Standard Canonical Discrete Action Space Mapping for GMN-Football-3 RL Environment.
+ * Size: Discrete(19) matching GMN-Football-3 authoritative action specifications.
  *
- * ID | NAME                      | EFFECT
+ * ID | NAME                      | EFFECT (GMN-Football Semantics)
  * ---+---------------------------+---------------------------------------------------
- *  0 | action_idle               | No-op; sticky actions unaffected
- *  1 | action_left               | Move left (sticky)
- *  2 | action_top_left           | Move top-left (sticky)
- *  3 | action_top                | Move top (sticky)
- *  4 | action_top_right          | Move top-right (sticky)
- *  5 | action_right              | Move right (sticky)
- *  6 | action_bottom_right       | Move bottom-right (sticky)
- *  7 | action_bottom             | Move bottom (sticky)
- *  8 | action_bottom_left        | Move bottom-left (sticky)
- *  9 | action_long_pass          | Long pass, target auto-determined by movement direction
- * 10 | action_high_pass          | High pass, same targeting logic
- * 11 | action_short_pass         | Short pass, same targeting logic
- * 12 | action_shot               | Shot toward opponent goal
- * 13 | action_sprint             | Start sprinting (sticky; faster, worse ball handling)
- * 14 | action_release_direction  | Clear current movement direction
- * 15 | action_release_sprint     | Stop sprinting
- * 16 | action_sliding            | Slide tackle (only effective without ball possession)
- * 17 | action_dribble            | Start dribbling (sticky; slower, harder to dispossess)
- * 18 | action_release_dribble    | Stop dribbling
+ *  0 | action_idle               | No-op; existing sticky movement/dribble/sprint unaffected
+ *  1 | action_left               | Move left (-x direction) (sticky)
+ *  2 | action_top_left           | Move top-left (-x, -y direction) (sticky)
+ *  3 | action_top                | Move top (-y direction) (sticky)
+ *  4 | action_top_right          | Move top-right (+x, -y direction) (sticky)
+ *  5 | action_right              | Move right (+x direction) (sticky)
+ *  6 | action_bottom_right       | Move bottom-right (+x, +y direction) (sticky)
+ *  7 | action_bottom             | Move bottom (+y direction) (sticky)
+ *  8 | action_bottom_left        | Move bottom-left (-x, +y direction) (sticky)
+ *  9 | action_long_pass          | Long pass with loft 0.35, power 1.0
+ * 10 | action_high_pass          | High lobbed pass with loft 0.45, power 0.85
+ * 11 | action_short_pass         | Ground pass with loft 0.0, power 0.75
+ * 12 | action_shot               | Direct shot on opponent goal with loft 0.15, power 0.95
+ * 13 | action_sprint             | Start sprinting (sticky; 1.3x speed, faster stamina drain)
+ * 14 | action_release_direction  | Stop active directional movement (clears target/velocity)
+ * 15 | action_release_sprint     | Stop sprinting (sticky sprint released)
+ * 16 | action_sliding            | Execute slide tackle / dispossession attempt
+ * 17 | action_dribble            | Start close dribbling (sticky; 0.6x speed, higher control)
+ * 18 | action_release_dribble    | Stop close dribbling (sticky dribble released)
  */
-export const ACTION_SPACE_SIZE = 19;
 
 const SQRT_HALF = 0.7071067811865476;
 
 export function mapDiscreteAction(actionIdx: number, currentHeading = 0): AgentAction {
+  if (typeof actionIdx !== 'number' || !Number.isInteger(actionIdx) || actionIdx < 0 || actionIdx >= ACTION_SPACE_SIZE) {
+    throw new Error(
+      `[GMN Action Mapping Error] Invalid action index: ${actionIdx}. Expected integer in range [0, ${ACTION_SPACE_SIZE - 1}].`
+    );
+  }
+
   switch (actionIdx) {
     case 0:
       return { type: ActionType.IDLE };
@@ -71,6 +79,7 @@ export function mapDiscreteAction(actionIdx: number, currentHeading = 0): AgentA
     case 18: // RELEASE_DRIBBLE
       return { type: ActionType.RELEASE_DRIBBLE };
     default:
-      return { type: ActionType.IDLE };
+      throw new Error(`[GMN Action Mapping Error] Unhandled action index: ${actionIdx}`);
   }
 }
+

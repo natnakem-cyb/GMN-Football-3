@@ -23,8 +23,10 @@ import { PITCH, getFormationPositions } from './Rules';
 import { PhysicsEngine } from './Physics';
 import { Vec2, Vec3 } from './Vector';
 import { ObservationEncoder } from './ObservationEncoder';
+import { SeededRNG } from './SeededRNG';
 
 export class GameEngine {
+  public rng: SeededRNG = new SeededRNG(0);
   public ball: Ball;
   public players: Player[] = [];
   public score: MatchScore = { left: 0, right: 0 };
@@ -199,7 +201,27 @@ export class GameEngine {
     this.recordEvent('kickoff', 'Match Kickoff', { x: 0, y: 0 });
   }
 
-  public loadScenario(scenario: ScenarioConfig): void {
+  public setSeed(seed: number): void {
+    this.rng.setSeed(seed);
+  }
+
+  public getObservation(): RLObservation {
+    return ObservationEncoder.encode(
+      this.players,
+      this.ball,
+      this.controlledPlayerId,
+      this.score,
+      this.tickCount,
+      this.activeScenario ? this.activeScenario.timeLimitSeconds * 60 : 3600,
+      this.gameMode
+    );
+  }
+
+  public loadScenario(scenario: ScenarioConfig, seed?: number): void {
+    if (seed !== undefined) {
+      this.setSeed(seed);
+    }
+
     this.activeScenario = {
       ...scenario,
       objectives: scenario.objectives.map((o) => ({ ...o, isCompleted: false, isFailed: false })),
@@ -217,73 +239,143 @@ export class GameEngine {
 
     this.ball.position = { ...scenario.setup.ball };
 
-    // Setup left players
-    scenario.setup.leftPlayers.forEach((pData, idx) => {
-      const player: Player = {
-        id: `left_${idx + 1}`,
-        name: `Trainee #${idx + 1}`,
-        number: idx === 0 ? 10 : idx + 1,
-        team: 'left',
-        role: pData.role,
-        position: { ...pData.pos },
-        targetPosition: { ...pData.pos },
-        velocity: { x: 0, y: 0 },
-        heading: 0,
-        stamina: 100,
-        isSprinting: false,
-        isTackling: false,
-        tackleCooldown: 0,
-        hasBall: false,
-        isGoalkeeper: pData.role === 'GK',
-        stats: {
-          speed: 88,
-          stamina: 95,
-          kickPower: 86,
-          passingAccuracy: 88,
-          dribbling: 90,
-          tackling: 75,
-        },
-        yellowCards: 0,
-        redCard: false,
-      };
-      this.players.push(player);
+    // Setup left players (if empty, fallback to formation layout)
+    if (scenario.setup.leftPlayers.length === 0 && scenario.teamLeftPlayers > 0) {
+      const positions = getFormationPositions(this.teamLeftConfig.formation, 'left', scenario.teamLeftPlayers);
+      positions.forEach((pData, idx) => {
+        const player: Player = {
+          id: `left_${idx + 1}`,
+          name: idx === 0 ? 'Goalkeeper A' : `Player #${idx + 1}`,
+          number: idx + 1,
+          team: 'left',
+          role: pData.role,
+          position: { ...pData.pos },
+          targetPosition: { ...pData.pos },
+          velocity: { x: 0, y: 0 },
+          heading: 0,
+          stamina: 100,
+          isSprinting: false,
+          isTackling: false,
+          tackleCooldown: 0,
+          hasBall: false,
+          isGoalkeeper: pData.role === 'GK',
+          stats: {
+            speed: 82 + (idx % 4) * 3,
+            stamina: 85,
+            kickPower: 80 + (idx % 3) * 5,
+            passingAccuracy: 84,
+            dribbling: 82,
+            tackling: pData.role === 'CB' || pData.role === 'GK' ? 88 : 70,
+          },
+          yellowCards: 0,
+          redCard: false,
+        };
+        this.players.push(player);
+      });
+      const defaultControllable = this.players.find((p) => p.team === 'left' && !p.isGoalkeeper);
+      this.controlledPlayerId = defaultControllable ? defaultControllable.id : this.players[0]?.id || null;
+    } else {
+      scenario.setup.leftPlayers.forEach((pData, idx) => {
+        const player: Player = {
+          id: `left_${idx + 1}`,
+          name: `Trainee #${idx + 1}`,
+          number: idx === 0 ? 10 : idx + 1,
+          team: 'left',
+          role: pData.role,
+          position: { ...pData.pos },
+          targetPosition: { ...pData.pos },
+          velocity: { x: 0, y: 0 },
+          heading: 0,
+          stamina: 100,
+          isSprinting: false,
+          isTackling: false,
+          tackleCooldown: 0,
+          hasBall: false,
+          isGoalkeeper: pData.role === 'GK',
+          stats: {
+            speed: 88,
+            stamina: 95,
+            kickPower: 86,
+            passingAccuracy: 88,
+            dribbling: 90,
+            tackling: 75,
+          },
+          yellowCards: 0,
+          redCard: false,
+        };
+        this.players.push(player);
 
-      if (pData.isControlled || idx === 0) {
-        this.controlledPlayerId = player.id;
-      }
-    });
+        if (pData.isControlled || idx === 0) {
+          this.controlledPlayerId = player.id;
+        }
+      });
+    }
 
-    // Setup right players
-    scenario.setup.rightPlayers.forEach((pData, idx) => {
-      const player: Player = {
-        id: `right_${idx + 1}`,
-        name: pData.role === 'GK' ? 'Academy Keeper' : `Opponent Defender #${idx + 1}`,
-        number: idx === 0 ? 1 : idx + 2,
-        team: 'right',
-        role: pData.role,
-        position: { ...pData.pos },
-        targetPosition: { ...pData.pos },
-        velocity: { x: 0, y: 0 },
-        heading: Math.PI,
-        stamina: 100,
-        isSprinting: false,
-        isTackling: false,
-        tackleCooldown: 0,
-        hasBall: false,
-        isGoalkeeper: pData.role === 'GK',
-        stats: {
-          speed: 80,
-          stamina: 85,
-          kickPower: 80,
-          passingAccuracy: 75,
-          dribbling: 70,
-          tackling: 84,
-        },
-        yellowCards: 0,
-        redCard: false,
-      };
-      this.players.push(player);
-    });
+    // Setup right players (if empty, fallback to formation layout)
+    if (scenario.setup.rightPlayers.length === 0 && scenario.teamRightPlayers > 0) {
+      const positions = getFormationPositions(this.teamRightConfig.formation, 'right', scenario.teamRightPlayers);
+      positions.forEach((pData, idx) => {
+        const player: Player = {
+          id: `right_${idx + 1}`,
+          name: idx === 0 ? 'Goalkeeper B' : `Player #${idx + 1}`,
+          number: idx + 1,
+          team: 'right',
+          role: pData.role,
+          position: { ...pData.pos },
+          targetPosition: { ...pData.pos },
+          velocity: { x: 0, y: 0 },
+          heading: Math.PI,
+          stamina: 100,
+          isSprinting: false,
+          isTackling: false,
+          tackleCooldown: 0,
+          hasBall: false,
+          isGoalkeeper: pData.role === 'GK',
+          stats: {
+            speed: 80 + (idx % 4) * 3,
+            stamina: 85,
+            kickPower: 80 + (idx % 3) * 5,
+            passingAccuracy: 82,
+            dribbling: 80,
+            tackling: pData.role === 'CB' || pData.role === 'GK' ? 88 : 70,
+          },
+          yellowCards: 0,
+          redCard: false,
+        };
+        this.players.push(player);
+      });
+    } else {
+      scenario.setup.rightPlayers.forEach((pData, idx) => {
+        const player: Player = {
+          id: `right_${idx + 1}`,
+          name: pData.role === 'GK' ? 'Academy Keeper' : `Opponent Defender #${idx + 1}`,
+          number: idx === 0 ? 1 : idx + 2,
+          team: 'right',
+          role: pData.role,
+          position: { ...pData.pos },
+          targetPosition: { ...pData.pos },
+          velocity: { x: 0, y: 0 },
+          heading: Math.PI,
+          stamina: 100,
+          isSprinting: false,
+          isTackling: false,
+          tackleCooldown: 0,
+          hasBall: false,
+          isGoalkeeper: pData.role === 'GK',
+          stats: {
+            speed: 80,
+            stamina: 85,
+            kickPower: 80,
+            passingAccuracy: 75,
+            dribbling: 70,
+            tackling: 84,
+          },
+          yellowCards: 0,
+          redCard: false,
+        };
+        this.players.push(player);
+      });
+    }
 
     this.recordEvent('kickoff', `Started Scenario: ${scenario.name}`, { x: this.ball.position.x, y: this.ball.position.y });
   }
@@ -507,7 +599,7 @@ export class GameEngine {
       case ActionType.SLIDING:
       case ActionType.TACKLE:
         if (!player.hasBall && this.ball.ownerId !== player.id) {
-          const tackleResult = PhysicsEngine.executeTackle(player, this.ball, this.players);
+          const tackleResult = PhysicsEngine.executeTackle(player, this.ball, this.players, this.rng);
           if (tackleResult === 'success') {
             this.stats.tackles[player.team]++;
             this.recordEvent('tackle', `${player.name} executed a clean slide tackle!`, player.position, player.team);
@@ -863,7 +955,7 @@ export class GameEngine {
     playerId?: string
   ): void {
     const event: MatchEvent = {
-      id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: `evt_${this.tickCount}_${this.events.length + 1}`,
       timeSeconds: this.matchTimeSeconds,
       type,
       team,

@@ -1,6 +1,7 @@
 import { Ball, Player, TeamSide, Vector2D, Vector3D } from '../types/football';
 import { PITCH } from './Rules';
 import { Vec2, Vec3 } from './Vector';
+import { SeededRNG } from './SeededRNG';
 
 export class PhysicsEngine {
   static GRAVITY = 9.8;
@@ -160,7 +161,8 @@ export class PhysicsEngine {
   static executeTackle(
     player: Player,
     ball: Ball,
-    otherPlayers: Player[]
+    otherPlayers: Player[],
+    rng?: SeededRNG
   ): 'success' | 'miss' | 'foul' {
     if (player.tackleCooldown > 0) return 'miss';
 
@@ -178,15 +180,16 @@ export class PhysicsEngine {
       if (ball.ownerId) {
         const owner = otherPlayers.find((p) => p.id === ball.ownerId);
         if (owner && owner.team !== player.team) {
-          // Deterministic pseudo-random roll for foul chance (15% mistimed-tackle chance)
-          // Uses spatial coordinates to be 100% deterministic with no unseeded Math.random()
-          const pseudoHash =
-            (Math.abs(
-              Math.sin(player.position.x * 12.9898 + player.position.y * 78.233 + distToBall * 43758.5453) *
-                43758.5453
-            ) % 1);
+          // Deterministic roll for foul chance (15% mistimed-tackle chance)
+          // Uses seeded RNG if available, or spatial pseudo-hash
+          const roll = rng
+            ? rng.next()
+            : (Math.abs(
+                Math.sin(player.position.x * 12.9898 + player.position.y * 78.233 + distToBall * 43758.5453) *
+                  43758.5453
+              ) % 1);
 
-          if (pseudoHash < 0.15) {
+          if (roll < 0.15) {
             // Foul committed: ball stays with original owner (no dispossession)
             return 'foul';
           }
@@ -198,7 +201,9 @@ export class PhysicsEngine {
           ball.lastOwnerTeam = player.team;
 
           // Push ball away or claim it (using deterministic deflection angle)
-          const angleOffset = (((pseudoHash * 10) % 1) - 0.5) * 0.4;
+          const angleOffset = rng
+            ? rng.nextRange(-0.2, 0.2)
+            : (((roll * 10) % 1) - 0.5) * 0.4;
           const kickDir = Vec2.fromAngle(player.heading + angleOffset);
           ball.velocity = {
             x: kickDir.x * 0.02,

@@ -1,7 +1,7 @@
 import { GameEngine } from '../src/engine/GameEngine';
 import { ACADEMY_SCENARIOS } from '../src/scenarios/ScenarioRegistry';
 import { ActionType, AgentAction } from '../src/types/football';
-import { mapDiscreteAction } from './action_mapping';
+import { mapDiscreteAction, ACTION_SPACE_SIZE } from './action_mapping';
 
 function benchmarkRawEngine(totalSteps = 10000) {
   console.log('==================================================');
@@ -19,7 +19,7 @@ function benchmarkRawEngine(totalSteps = 10000) {
     const actionMap = new Map<string, AgentAction>();
     const controlledPlayer = engine.players[0];
     if (controlledPlayer) {
-      actionMap.set(controlledPlayer.id, mapDiscreteAction((i % 15), controlledPlayer.heading));
+      actionMap.set(controlledPlayer.id, mapDiscreteAction(i % ACTION_SPACE_SIZE, controlledPlayer.heading));
     }
 
     const res = engine.step(actionMap, 1 / 60);

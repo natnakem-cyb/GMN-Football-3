@@ -2,7 +2,15 @@ import http from 'http';
 import { GameEngine } from '../src/engine/GameEngine';
 import { ACADEMY_SCENARIOS } from '../src/scenarios/ScenarioRegistry';
 import { ActionType, AgentAction, ScenarioConfig } from '../src/types/football';
-import { mapDiscreteAction, ACTION_SPACE_SIZE } from './action_mapping';
+import { mapDiscreteAction } from './action_mapping';
+import {
+  GMN_ENV_VERSION,
+  OBSERVATION_SCHEMA_VERSION,
+  ACTION_SCHEMA_VERSION,
+  OBSERVATION_DIM,
+  ACTION_SPACE_SIZE,
+} from '../src/engine/Contract';
+import { Vec2 } from '../src/engine/Vector';
 import { RuleBasedAgent } from '../src/agents/RuleBasedAgent';
 
 const PORT = parseInt(process.env.GMN_BRIDGE_PORT || '5050', 10);
@@ -33,18 +41,24 @@ class GMNBridgeService {
   public reset(scenarioName = 'academy_empty_goal', seed?: number) {
     const sc = this.scenarioMap.get(scenarioName) || this.scenarioMap.get('academy_empty_goal');
     if (sc) {
-      this.engine.loadScenario(sc);
+      this.engine.loadScenario(sc, seed);
     } else {
-      this.engine.resetToKickoff();
+      this.engine.resetToKickoff(seed);
     }
 
-    // Generate initial step result for observation
-    const initialObs = this.engine.step(new Map(), 0);
+    // Reset bot states
+    this.botAgents.clear();
+
+    // Pure initial observation without stepping physics
+    const initialObs = this.engine.getObservation();
     return {
-      observation: initialObs.observation.rawVector,
+      observation: initialObs.rawVector,
       info: {
-        score: initialObs.info.score,
-        ballDistanceToGoal: initialObs.info.ballDistanceToGoal,
+        score: { ...this.engine.score },
+        ballDistanceToGoal: Vec2.distance(
+          { x: this.engine.ball.position.x, y: this.engine.ball.position.y },
+          { x: 1.0, y: 0 }
+        ),
         scenario: sc?.codeName || 'free_play',
         controlledPlayerId: this.engine.controlledPlayerId,
       },
@@ -108,10 +122,15 @@ class GMNBridgeService {
   public getInfo() {
     return {
       status: 'ok',
-      observation_dim: 115,
-      action_dim: ACTION_SPACE_SIZE,
+      environment: 'GMN-Football-3',
+      environment_version: GMN_ENV_VERSION,
+      observation_dim: OBSERVATION_DIM,
+      observation_schema_version: OBSERVATION_SCHEMA_VERSION,
+      action_space_size: ACTION_SPACE_SIZE,
+      action_schema_version: ACTION_SCHEMA_VERSION,
       scenario: this.engine.activeScenario?.codeName || 'none',
       controlledPlayerId: this.engine.controlledPlayerId,
+      scenarios: Array.from(new Set(ACADEMY_SCENARIOS.map((s) => s.codeName))),
     };
   }
 }
@@ -156,8 +175,12 @@ const server = http.createServer((req, res) => {
       }
 
       if (req.method === 'POST' && req.url === '/step') {
-        const action = typeof parsedBody.action === 'number' ? parsedBody.action : 0;
-        const stepResult = bridge.step(action);
+        if (typeof parsedBody.action !== 'number' || !Number.isInteger(parsedBody.action)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: `Invalid action: ${parsedBody.action}. Must be integer in [0, ${ACTION_SPACE_SIZE - 1}].` }));
+          return;
+        }
+        const stepResult = bridge.step(parsedBody.action);
         res.writeHead(200);
         res.end(JSON.stringify(stepResult));
         return;

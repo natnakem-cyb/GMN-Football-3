@@ -1,19 +1,32 @@
 import { GameEngine } from '../src/engine/GameEngine';
 import { ACADEMY_SCENARIOS } from '../src/scenarios/ScenarioRegistry';
-import { ActionType, AgentAction } from '../src/types/football';
+import { AgentAction } from '../src/types/football';
 import { mapDiscreteAction } from './action_mapping';
+import { OBSERVATION_DIM } from '../src/engine/Contract';
 
-function runDeterministicRun(runId: number, numSteps = 100): { observations: number[][]; rewards: number[]; finalDist: number } {
+function runSeededSimulation(scenarioId: string, seed: number, actionSequence: number[]): {
+  observations: number[][];
+  rewards: number[];
+  finalBallX: number;
+} {
   const engine = new GameEngine();
-  const scenario = ACADEMY_SCENARIOS.find((s) => s.id === 'academy_empty_goal')!;
-  engine.loadScenario(scenario);
+  const scenario = ACADEMY_SCENARIOS.find((s) => s.id === scenarioId || s.codeName === scenarioId)!;
+  if (!scenario) {
+    throw new Error(`Scenario ${scenarioId} not found`);
+  }
 
-  const observations: number[][] = [];
+  engine.loadScenario(scenario, seed);
+
+  const initialObs = engine.getObservation();
+  if (initialObs.rawVector.length !== OBSERVATION_DIM) {
+    throw new Error(`Initial observation dimension mismatch: expected ${OBSERVATION_DIM}, got ${initialObs.rawVector.length}`);
+  }
+
+  const observations: number[][] = [initialObs.rawVector];
   const rewards: number[] = [];
 
-  for (let t = 0; t < numSteps; t++) {
-    // Action pattern: Move right (5), sprint (13), shoot (12)
-    const actionIdx = t < 60 ? 5 : t < 80 ? 13 : 12;
+  for (let t = 0; t < actionSequence.length; t++) {
+    const actionIdx = actionSequence[t];
     const player = engine.players.find((p) => p.id === engine.controlledPlayerId) || engine.players[0];
     const action = mapDiscreteAction(actionIdx, player.heading);
 
@@ -25,50 +38,61 @@ function runDeterministicRun(runId: number, numSteps = 100): { observations: num
     rewards.push(res.reward);
   }
 
-  const finalDist = engine.ball.position.x;
-  return { observations, rewards, finalDist };
+  return { observations, rewards, finalBallX: engine.ball.position.x };
 }
 
-console.log('==================================================');
-console.log('GMN FOOTBALL — DETERMINISM TEST');
-console.log('==================================================');
+console.log('====================================================');
+console.log('GMN-FOOTBALL-3 — DETERMINISM & SEED REPRODUCIBILITY TEST');
+console.log('====================================================');
 
-console.log('\nRunning Run 1 (100 steps)...');
-const run1 = runDeterministicRun(1, 100);
+const actions = [5, 5, 5, 5, 5, 13, 13, 13, 13, 13, 5, 5, 12, 0, 0, 16, 17, 18, 1, 2, 3, 4, 9, 10, 11];
 
-console.log('Running Run 2 (100 steps)...');
-const run2 = runDeterministicRun(2, 100);
+let allPassed = true;
 
-let isIdentical = true;
-let maxDiff = 0;
+for (const sc of ['academy_empty_goal', 'academy_run_to_score', 'academy_pass_and_shoot_with_keeper']) {
+  console.log(`\nTesting scenario: ${sc} (Seed 424242)...`);
+  const run1 = runSeededSimulation(sc, 424242, actions);
+  const run2 = runSeededSimulation(sc, 424242, actions);
 
-for (let i = 0; i < run1.observations.length; i++) {
-  const obs1 = run1.observations[i];
-  const obs2 = run2.observations[i];
-  const rew1 = run1.rewards[i];
-  const rew2 = run2.rewards[i];
+  let scenarioMatch = true;
+  let maxDiff = 0;
 
-  if (Math.abs(rew1 - rew2) > 1e-6) {
-    isIdentical = false;
-    console.error(`Reward mismatch at step ${i}: ${rew1} vs ${rew2}`);
-  }
+  for (let i = 0; i < run1.observations.length; i++) {
+    const obs1 = run1.observations[i];
+    const obs2 = run2.observations[i];
 
-  for (let d = 0; d < obs1.length; d++) {
-    const diff = Math.abs(obs1[d] - obs2[d]);
-    if (diff > maxDiff) maxDiff = diff;
-    if (diff > 1e-6) {
-      isIdentical = false;
-      console.error(`Observation mismatch at step ${i}, dim ${d}: ${obs1[d]} vs ${obs2[d]}`);
-      break;
+    for (let d = 0; d < obs1.length; d++) {
+      const diff = Math.abs(obs1[d] - obs2[d]);
+      if (diff > maxDiff) maxDiff = diff;
+      if (diff > 1e-7) {
+        scenarioMatch = false;
+        console.error(`  [MISMATCH] Step ${i}, Dim ${d}: ${obs1[d]} vs ${obs2[d]}`);
+        break;
+      }
     }
   }
+
+  for (let i = 0; i < run1.rewards.length; i++) {
+    if (Math.abs(run1.rewards[i] - run2.rewards[i]) > 1e-7) {
+      scenarioMatch = false;
+      console.error(`  [REWARD MISMATCH] Step ${i}: ${run1.rewards[i]} vs ${run2.rewards[i]}`);
+    }
+  }
+
+  if (scenarioMatch && maxDiff === 0) {
+    console.log(`  ✓ ${sc}: 100% bitwise trajectory determinism confirmed (max diff: ${maxDiff}).`);
+  } else {
+    console.error(`  ✗ ${sc}: Determinism check failed.`);
+    allPassed = false;
+  }
 }
 
-console.log(`\nMax numerical difference: ${maxDiff}`);
-if (isIdentical && maxDiff === 0) {
-  console.log('✓ DETERMINISM VERIFIED: Both runs produced 100% identical states, observations, and rewards.');
+if (allPassed) {
+  console.log('\n====================================================');
+  console.log('✓ ALL DETERMINISM SUITES PASSED CLEANLY');
+  console.log('====================================================');
   process.exit(0);
 } else {
-  console.error('✗ DETERMINISM FAILED');
+  console.error('\n✗ DETERMINISM TEST SUITE FAILED');
   process.exit(1);
 }
