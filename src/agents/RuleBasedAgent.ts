@@ -16,7 +16,8 @@ export class RuleBasedAgent implements IAgent {
   }
 
   decide(context: AgentDecisionContext): AgentAction {
-    const { player, ball, teammates, opponents, teamSide } = context;
+    const { player, ball, teammates, opponents, teamSide, rng } = context;
+    const rnd = rng ? () => rng.next() : Math.random;
     const opponentGoalX = teamSide === 'left' ? 1.0 : -1.0;
     const ownGoalX = teamSide === 'left' ? -1.0 : 1.0;
 
@@ -26,24 +27,24 @@ export class RuleBasedAgent implements IAgent {
 
     // 1. Goalkeeper Specific Heuristic
     if (player.isGoalkeeper) {
-      return this.handleGoalkeeper(player, ball, teammates, ownGoalX);
+      return this.handleGoalkeeper(player, ball, teammates, ownGoalX, rnd);
     }
 
     // 2. If this player currently HAS the ball
     if (player.hasBall || ball.ownerId === player.id) {
       // Shooting heuristic: within shooting range and relatively centered
       if (distToGoal < 0.6) {
-        const goalCenter: Vector2D = { x: opponentGoalX, y: (Math.random() - 0.5) * 0.09 };
+        const goalCenter: Vector2D = { x: opponentGoalX, y: (rnd() - 0.5) * 0.09 };
         const shootDir = Vec2.sub(goalCenter, player.position);
         
         // Random shot variance based on difficulty
         const variance = this.difficulty === 'master' ? 0.01 : this.difficulty === 'hard' ? 0.03 : 0.07;
-        shootDir.y += (Math.random() - 0.5) * variance;
+        shootDir.y += (rnd() - 0.5) * variance;
 
         return {
           type: ActionType.SHOT,
           direction: Vec2.normalize(shootDir),
-          power: 0.85 + Math.random() * 0.15,
+          power: 0.85 + rnd() * 0.15,
         };
       }
 
@@ -52,7 +53,7 @@ export class RuleBasedAgent implements IAgent {
       const isUnderPressure = nearestOpponent && Vec2.distance(player.position, nearestOpponent.position) < 0.12;
 
       // Passing heuristic: find open teammate further up the pitch
-      if (isUnderPressure || Math.random() < (this.difficulty === 'master' ? 0.25 : 0.12)) {
+      if (isUnderPressure || rnd() < (this.difficulty === 'master' ? 0.25 : 0.12)) {
         const passTarget = this.findBestPassTarget(player, teammates, opponents, teamSide);
         if (passTarget) {
           const passDir = Vec2.sub(passTarget.position, player.position);
@@ -137,14 +138,15 @@ export class RuleBasedAgent implements IAgent {
     keeper: Player,
     ball: Ball,
     teammates: Player[],
-    ownGoalX: number
+    ownGoalX: number,
+    rnd: () => number = Math.random
   ): AgentAction {
     const ballPos2D: Vector2D = { x: ball.position.x, y: ball.position.y };
 
     if (keeper.hasBall || ball.ownerId === keeper.id) {
       // Distribute to outfield player
       const outfielders = teammates.filter((t) => !t.isGoalkeeper);
-      const target = outfielders[Math.floor(Math.random() * outfielders.length)] || outfielders[0];
+      const target = outfielders[Math.floor(rnd() * outfielders.length)] || outfielders[0];
       if (target) {
         return {
           type: ActionType.HIGH_PASS,

@@ -98,6 +98,7 @@ class GMNBridgeService {
         teamSide: player.team,
         controlledPlayerId: this.engine.controlledPlayerId,
         matchTime: this.engine.matchTimeSeconds,
+        rng: this.engine.rng,
       };
       actionMap.set(player.id, bot.decide(context));
     });

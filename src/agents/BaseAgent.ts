@@ -9,6 +9,7 @@ export interface AgentDecisionContext {
   teamSide: TeamSide;
   controlledPlayerId: string | null;
   matchTime: number;
+  rng?: { next(): number };
 }
 
 export interface IAgent {
