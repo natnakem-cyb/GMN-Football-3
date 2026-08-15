@@ -1,0 +1,5 @@
+gymnasium>=0.28.1,<=1.0.0
+stable-baselines3>=2.0.0,<=2.3.2
+torch>=2.0.0
+numpy>=1.23.0
+requests>=2.28.0
