@@ -1,6 +1,6 @@
 import { GameEngine } from '../src/engine/GameEngine';
 import { ACADEMY_SCENARIOS } from '../src/scenarios/ScenarioRegistry';
-import { ActionType, AgentAction } from '../src/types/football';
+import { ActionType, AgentAction, GameMode } from '../src/types/football';
 import { mapDiscreteAction, ACTION_SPACE_SIZE } from './action_mapping';
 import { RuleBasedAgent } from '../src/agents/RuleBasedAgent';
 
@@ -17,8 +17,8 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
   console.log('==================================================');
 
   const engine = new GameEngine();
-  const scenario = ACADEMY_SCENARIOS.find((s) => s.id === 'academy_empty_goal')!;
-  engine.loadScenario(scenario);
+  let scenarioIdx = 0;
+  engine.loadScenario(ACADEMY_SCENARIOS[scenarioIdx]);
 
   const featureStats: FeatureStats[] = Array.from({ length: 115 }, () => ({
     min: Infinity,
@@ -43,16 +43,57 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
   const episodeLengths: number[] = [];
   let goalsScored = 0;
 
-  // Run across all 15 actions + random actions + dynamic movements
+  // Run across all 19 actions + dynamic movements across scenarios
   for (let step = 0; step < totalSteps; step++) {
     currentEpisodeLength++;
     const actionIdx = Math.floor(Math.random() * ACTION_SPACE_SIZE);
     const controlledPlayer = engine.players.find((p) => p.id === engine.controlledPlayerId) || engine.players[0];
-    const action = mapDiscreteAction(actionIdx, controlledPlayer?.heading || 0);
+    
+    let action: AgentAction;
+    if (Math.random() < 0.4 && controlledPlayer) {
+      const dx = engine.ball.position.x - controlledPlayer.position.x;
+      const dy = engine.ball.position.y - controlledPlayer.position.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 0.08 && engine.ball.ownerId && engine.ball.ownerId !== controlledPlayer.id) {
+        action = { type: ActionType.SLIDING };
+      } else if (dist > 0.02) {
+        action = { type: ActionType.MOVE, direction: { x: dx / dist, y: dy / dist } };
+      } else {
+        action = mapDiscreteAction(actionIdx, controlledPlayer.heading);
+      }
+    } else {
+      action = mapDiscreteAction(actionIdx, controlledPlayer?.heading || 0);
+    }
 
     const actionMap = new Map<string, AgentAction>();
     if (controlledPlayer) {
       actionMap.set(controlledPlayer.id, action);
+    }
+
+    // Step other players: seek ball and tackle if opposing owner nearby
+    for (const p of engine.players) {
+      if (p.id !== controlledPlayer?.id) {
+        const dx = engine.ball.position.x - p.position.x;
+        const dy = engine.ball.position.y - p.position.y;
+        const dist = Math.hypot(dx, dy);
+        if (engine.ball.ownerId && engine.ball.ownerId !== p.id) {
+          const owner = engine.players.find((pl) => pl.id === engine.ball.ownerId);
+          if (owner && owner.team !== p.team) {
+            if (dist < 0.09) {
+              actionMap.set(p.id, { type: ActionType.SLIDING });
+              continue;
+            }
+          }
+        }
+        if (Math.random() < 0.4) {
+          if (dist > 0.05) {
+            actionMap.set(p.id, { type: ActionType.MOVE, direction: { x: dx / dist, y: dy / dist } });
+          } else {
+            const randActIdx = Math.floor(Math.random() * ACTION_SPACE_SIZE);
+            actionMap.set(p.id, mapDiscreteAction(randActIdx, p.heading));
+          }
+        }
+      }
     }
 
     const stepResult = engine.step(actionMap, 1 / 60);
@@ -91,7 +132,8 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
       episodeCount++;
       episodeLengths.push(currentEpisodeLength);
       currentEpisodeLength = 0;
-      engine.loadScenario(scenario);
+      scenarioIdx = (scenarioIdx + 1) % ACADEMY_SCENARIOS.length;
+      engine.loadScenario(ACADEMY_SCENARIOS[scenarioIdx]);
     }
   }
 
@@ -105,7 +147,7 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
   console.log('Dims  0-43 (Left Players: x, y, vx, vy):');
   console.log(`  x: [${featureStats[0].min.toFixed(3)}, ${featureStats[0].max.toFixed(3)}], y: [${featureStats[1].min.toFixed(3)}, ${featureStats[1].max.toFixed(3)}], vx: [${featureStats[22].min.toFixed(3)}, ${featureStats[22].max.toFixed(3)}], vy: [${featureStats[23].min.toFixed(3)}, ${featureStats[23].max.toFixed(3)}]`);
   console.log('Dims 44-87 (Right Players: x, y, vx, vy):');
-  console.log(`  Range: [${featureStats[44].min.toFixed(3)}, ${featureStats[44].max.toFixed(3)}] (empty in academy_empty_goal = -1.0)`);
+  console.log(`  Range: [${featureStats[44].min.toFixed(3)}, ${featureStats[44].max.toFixed(3)}] (inactive: -1.0)`);
   console.log('Dims 88-93 (Ball: x, y, z, vx, vy, vz):');
   console.log(`  ball.x: [${featureStats[88].min.toFixed(3)}, ${featureStats[88].max.toFixed(3)}], ball.y: [${featureStats[89].min.toFixed(3)}, ${featureStats[89].max.toFixed(3)}], ball.z: [${featureStats[90].min.toFixed(3)}, ${featureStats[90].max.toFixed(3)}]`);
   console.log(`  ball.vx: [${featureStats[91].min.toFixed(3)}, ${featureStats[91].max.toFixed(3)}], ball.vy: [${featureStats[92].min.toFixed(3)}, ${featureStats[92].max.toFixed(3)}], ball.vz: [${featureStats[93].min.toFixed(3)}, ${featureStats[93].max.toFixed(3)}]`);
@@ -114,7 +156,11 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
   console.log('Dims 97-107 (Active Player One-Hot, 11 slots):');
   console.log(`  val: [${featureStats[97].min.toFixed(3)}, ${featureStats[97].max.toFixed(3)}]`);
   console.log('Dims 108-114 (GameMode One-Hot [Normal, KickOff, GoalKick, FreeKick, Corner, ThrowIn, Penalty]):');
-  console.log(`  mode: [${featureStats[108].min}, ${featureStats[108].max}]`);
+  const modeNames = ['Normal', 'KickOff', 'GoalKick', 'FreeKick', 'Corner', 'ThrowIn', 'Penalty'];
+  modeNames.forEach((name, idx) => {
+    const dim = 108 + idx;
+    console.log(`  - ${name} (dim ${dim}): [${featureStats[dim].min}, ${featureStats[dim].max}] (active: ${featureStats[dim].max > 0 ? 'YES' : 'NO'})`);
+  });
 
   const rewardMean = rewardSum / totalRewards;
   const rewardVariance = rewardSqSum / totalRewards - rewardMean * rewardMean;
@@ -137,7 +183,7 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
   const avgEpLen = episodeLengths.reduce((a, b) => a + b, 0) / Math.max(1, episodeLengths.length);
   console.log(`- Total Episodes: ${episodeCount}`);
   console.log(`- Min Episode Length: ${minEpLen} steps`);
-  console.log(`- Max Episode Length: ${maxEpLen} steps (capped by scenario maxSteps: ${scenario.maxSteps || 900})`);
+  console.log(`- Max Episode Length: ${maxEpLen} steps`);
   console.log(`- Avg Episode Length: ${avgEpLen.toFixed(1)} steps`);
 
   console.log('\n==================================================');
@@ -221,6 +267,133 @@ function auditAllActions() {
 
     console.log(
       `| ${a.toString().padStart(2, ' ')} | ${actionNames[a].padEnd(18, ' ')} | ${mapped.type.padEnd(18, ' ')} | (${dx >= 0 ? '+' : ''}${dx.toFixed(3)}, ${dy >= 0 ? '+' : ''}${dy.toFixed(3)}) | (${bdx >= 0 ? '+' : ''}${bdx.toFixed(3)}, ${bdy >= 0 ? '+' : ''}${bdy.toFixed(3)}) | ${totalReward.toFixed(3)} | ${valid ? 'YES' : 'NO'} |`
+    );
+  }
+
+  auditGameModes();
+}
+
+function auditGameModes() {
+  console.log('\n==================================================');
+  console.log('3. GAME MODE TRIGGERING & OBSERVATION VERIFICATION');
+  console.log('==================================================');
+
+  const modeTests: {
+    name: string;
+    expectedMode: GameMode;
+    expectedDim: number;
+    setup: (engine: GameEngine) => void;
+  }[] = [
+    {
+      name: 'KickOff',
+      expectedMode: GameMode.KickOff,
+      expectedDim: 109,
+      setup: (eng) => {
+        eng.resetToKickoff();
+      },
+    },
+    {
+      name: 'Normal',
+      expectedMode: GameMode.Normal,
+      expectedDim: 108,
+      setup: (eng) => {
+        eng.resetToKickoff();
+        eng.step(new Map([[eng.players[0].id, { type: ActionType.MOVE, direction: { x: 1, y: 0 } }]]), 1 / 60);
+      },
+    },
+    {
+      name: 'GoalKick',
+      expectedMode: GameMode.GoalKick,
+      expectedDim: 110,
+      setup: (eng) => {
+        eng.resetToKickoff();
+        eng.ball.lastOwnerTeam = 'left';
+        eng.ball.position = { x: 1.05, y: 0.2, z: 0 };
+        eng.step(new Map(), 1 / 60);
+      },
+    },
+    {
+      name: 'Corner',
+      expectedMode: GameMode.Corner,
+      expectedDim: 112,
+      setup: (eng) => {
+        eng.resetToKickoff();
+        eng.ball.lastOwnerTeam = 'right';
+        eng.ball.position = { x: 1.05, y: 0.2, z: 0 };
+        eng.step(new Map(), 1 / 60);
+      },
+    },
+    {
+      name: 'ThrowIn',
+      expectedMode: GameMode.ThrowIn,
+      expectedDim: 113,
+      setup: (eng) => {
+        eng.resetToKickoff();
+        eng.ball.lastOwnerTeam = 'left';
+        eng.ball.position = { x: 0.2, y: 0.45, z: 0 };
+        eng.step(new Map(), 1 / 60);
+      },
+    },
+    {
+      name: 'FreeKick (Foul outside box)',
+      expectedMode: GameMode.FreeKick,
+      expectedDim: 111,
+      setup: (eng) => {
+        eng.loadScenario(ACADEMY_SCENARIOS.find((s) => s.id === 'academy_run_to_score')!);
+        const attacker = eng.players.find((p) => p.team === 'left')!;
+        const defender = eng.players.find((p) => p.team === 'right' && !p.isGoalkeeper)!;
+        defender.heading = Math.PI;
+
+        let attempts = 0;
+        while (eng.gameMode !== GameMode.FreeKick && attempts < 50) {
+          attacker.position = { x: 0.2, y: 0.0 };
+          defender.position = { x: 0.22, y: 0.001 * attempts };
+          eng.ball.position = { x: 0.2, y: 0.0, z: 0 };
+          eng.ball.ownerId = attacker.id;
+          attacker.hasBall = true;
+          defender.tackleCooldown = 0;
+          eng.step(new Map([[defender.id, { type: ActionType.SLIDING }]]), 1 / 60);
+          attempts++;
+        }
+      },
+    },
+    {
+      name: 'Penalty (Foul inside defending box)',
+      expectedMode: GameMode.Penalty,
+      expectedDim: 114,
+      setup: (eng) => {
+        eng.loadScenario(ACADEMY_SCENARIOS.find((s) => s.id === 'academy_run_to_score')!);
+        const attacker = eng.players.find((p) => p.team === 'left')!;
+        const defender = eng.players.find((p) => p.team === 'right' && !p.isGoalkeeper)!;
+        defender.heading = Math.PI;
+
+        let attempts = 0;
+        while (eng.gameMode !== GameMode.Penalty && attempts < 50) {
+          attacker.position = { x: 0.85, y: 0.0 };
+          defender.position = { x: 0.87, y: 0.001 * attempts };
+          eng.ball.position = { x: 0.85, y: 0.0, z: 0 };
+          eng.ball.ownerId = attacker.id;
+          attacker.hasBall = true;
+          defender.tackleCooldown = 0;
+          eng.step(new Map([[defender.id, { type: ActionType.SLIDING }]]), 1 / 60);
+          attempts++;
+        }
+      },
+    },
+  ];
+
+  for (const test of modeTests) {
+    const testEngine = new GameEngine();
+    test.setup(testEngine);
+    const obs = testEngine.step(
+      new Map([[testEngine.players[0].id, { type: ActionType.IDLE }]]),
+      1 / 60
+    ).observation.rawVector;
+    const modeSlice = obs.slice(108, 115);
+    const triggered = testEngine.gameMode === test.expectedMode;
+    const oneHotCorrect = obs[test.expectedDim] === 1.0;
+    console.log(
+      `✓ ${test.name.padEnd(30, ' ')} | GameMode: ${GameMode[testEngine.gameMode]} (${testEngine.gameMode}) | OneHot[108..114]: [${modeSlice.join(', ')}] | Match: ${triggered && oneHotCorrect ? 'PASS' : 'FAIL'}`
     );
   }
 }

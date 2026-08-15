@@ -407,9 +407,12 @@ export class GameEngine {
       player.stickyDirection = null;
     }
 
-    // If active action is taken during KickOff, transition to Normal mode
-    if (this.gameMode === GameMode.KickOff && action.type !== ActionType.IDLE) {
+    // If active action is taken during any non-Normal gameMode, transition back to Normal mode
+    if (this.gameMode !== GameMode.Normal && action.type !== ActionType.IDLE) {
       this.gameMode = GameMode.Normal;
+      if (this.status === 'corner' || this.status === 'goalkick') {
+        this.status = 'playing';
+      }
     }
 
     // 2. Handle specific action types
@@ -504,10 +507,56 @@ export class GameEngine {
       case ActionType.SLIDING:
       case ActionType.TACKLE:
         if (!player.hasBall && this.ball.ownerId !== player.id) {
-          const success = PhysicsEngine.executeTackle(player, this.ball, this.players);
-          if (success) {
+          const tackleResult = PhysicsEngine.executeTackle(player, this.ball, this.players);
+          if (tackleResult === 'success') {
             this.stats.tackles[player.team]++;
             this.recordEvent('tackle', `${player.name} executed a clean slide tackle!`, player.position, player.team);
+          } else if (tackleResult === 'foul') {
+            const fouledTeam: TeamSide = player.team === 'left' ? 'right' : 'left';
+
+            // Check if foul occurred inside the defending team's penalty box
+            let inPenaltyBox = false;
+            if (player.team === 'left') {
+              // Defending left goal (x: -1.0)
+              inPenaltyBox =
+                player.position.x >= PITCH.minX &&
+                player.position.x <= PITCH.minX + PITCH.penaltyBoxLength &&
+                Math.abs(player.position.y) <= PITCH.penaltyBoxWidth / 2;
+            } else {
+              // Defending right goal (x: 1.0)
+              inPenaltyBox =
+                player.position.x <= PITCH.maxX &&
+                player.position.x >= PITCH.maxX - PITCH.penaltyBoxLength &&
+                Math.abs(player.position.y) <= PITCH.penaltyBoxWidth / 2;
+            }
+
+            if (inPenaltyBox) {
+              this.gameMode = GameMode.Penalty;
+              const penaltySpotX =
+                player.team === 'left'
+                  ? PITCH.minX + PITCH.penaltySpotDist
+                  : PITCH.maxX - PITCH.penaltySpotDist;
+              this.ball.position = { x: penaltySpotX, y: 0, z: 0 };
+              this.ball.velocity = { x: 0, y: 0, z: 0 };
+              this.ball.ownerId = null;
+              this.recordEvent(
+                'foul',
+                `${player.name} committed a foul in the penalty box! PENALTY awarded to Team ${fouledTeam === 'left' ? 'Left' : 'Right'}!`,
+                player.position,
+                player.team
+              );
+            } else {
+              this.gameMode = GameMode.FreeKick;
+              this.ball.position = { x: player.position.x, y: player.position.y, z: 0 };
+              this.ball.velocity = { x: 0, y: 0, z: 0 };
+              this.ball.ownerId = null;
+              this.recordEvent(
+                'foul',
+                `${player.name} committed a foul! FREE KICK awarded to Team ${fouledTeam === 'left' ? 'Left' : 'Right'}`,
+                player.position,
+                player.team
+              );
+            }
           }
         }
         break;
@@ -599,7 +648,7 @@ export class GameEngine {
   private checkGoalAndBoundaries(): TeamSide | null {
     const { x, y } = this.ball.position;
 
-    // Check Right Goal (Left team scores)
+    // Check Right Goal (Left team scores / right endline)
     if (x >= PITCH.maxX) {
       if (y >= PITCH.goalMinY && y <= PITCH.goalMaxY) {
         this.score.left++;
@@ -612,11 +661,29 @@ export class GameEngine {
         this.goalResetTimer = 100; // ~1.6s pause
         return 'left';
       } else {
-        this.handleOutOfBounds('goal_kick_right');
+        // Right goal line: left attacks (x=1.0), right defends (x=1.0).
+        if (this.ball.lastOwnerTeam === 'right') {
+          // Defender touched last -> Corner kick awarded to Left
+          this.gameMode = GameMode.Corner;
+          this.status = 'corner';
+          const cornerY = y >= 0 ? PITCH.maxY : PITCH.minY;
+          this.ball.position = { x: PITCH.maxX, y: cornerY, z: 0 };
+          this.ball.velocity = { x: 0, y: 0, z: 0 };
+          this.ball.ownerId = null;
+          this.recordEvent('out_of_bounds', 'Corner Kick awarded to Team Left', this.ball.position, 'left');
+        } else {
+          // Attacker (left or unknown) touched last -> Goal Kick awarded to Right
+          this.gameMode = GameMode.GoalKick;
+          this.status = 'goalkick';
+          this.ball.position = { x: PITCH.maxX - PITCH.goalBoxLength, y: 0, z: 0 };
+          this.ball.velocity = { x: 0, y: 0, z: 0 };
+          this.ball.ownerId = null;
+          this.recordEvent('out_of_bounds', 'Goal Kick awarded to Team Right', this.ball.position, 'right');
+        }
       }
     }
 
-    // Check Left Goal (Right team scores)
+    // Check Left Goal (Right team scores / left endline)
     if (x <= PITCH.minX) {
       if (y >= PITCH.goalMinY && y <= PITCH.goalMaxY) {
         this.score.right++;
@@ -629,13 +696,43 @@ export class GameEngine {
         this.goalResetTimer = 100;
         return 'right';
       } else {
-        this.handleOutOfBounds('goal_kick_left');
+        // Left goal line: right attacks (x=-1.0), left defends (x=-1.0).
+        if (this.ball.lastOwnerTeam === 'left') {
+          // Defender touched last -> Corner kick awarded to Right
+          this.gameMode = GameMode.Corner;
+          this.status = 'corner';
+          const cornerY = y >= 0 ? PITCH.maxY : PITCH.minY;
+          this.ball.position = { x: PITCH.minX, y: cornerY, z: 0 };
+          this.ball.velocity = { x: 0, y: 0, z: 0 };
+          this.ball.ownerId = null;
+          this.recordEvent('out_of_bounds', 'Corner Kick awarded to Team Right', this.ball.position, 'right');
+        } else {
+          // Attacker (right or unknown) touched last -> Goal Kick awarded to Left
+          this.gameMode = GameMode.GoalKick;
+          this.status = 'goalkick';
+          this.ball.position = { x: PITCH.minX + PITCH.goalBoxLength, y: 0, z: 0 };
+          this.ball.velocity = { x: 0, y: 0, z: 0 };
+          this.ball.ownerId = null;
+          this.recordEvent('out_of_bounds', 'Goal Kick awarded to Team Left', this.ball.position, 'left');
+        }
       }
     }
 
-    // Touchlines (Y bounds)
+    // Touchlines (Y bounds) -> ThrowIn
     if (y < PITCH.minY || y > PITCH.maxY) {
-      this.handleOutOfBounds('throw_in');
+      this.gameMode = GameMode.ThrowIn;
+      const throwInTeam: TeamSide = this.ball.lastOwnerTeam === 'left' ? 'right' : 'left';
+      this.ball.velocity = { x: 0, y: 0, z: 0 };
+      this.ball.position.x = Math.max(PITCH.minX + 0.05, Math.min(PITCH.maxX - 0.05, this.ball.position.x));
+      this.ball.position.y = y > PITCH.maxY ? PITCH.maxY : PITCH.minY;
+      this.ball.position.z = 0;
+      this.ball.ownerId = null;
+      this.recordEvent(
+        'out_of_bounds',
+        `Throw-In awarded to Team ${throwInTeam === 'left' ? 'Left' : 'Right'}`,
+        this.ball.position,
+        throwInTeam
+      );
     }
 
     return null;
