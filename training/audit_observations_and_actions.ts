@@ -50,6 +50,7 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
     redCards: { left: 0, right: 0 },
     secondYellows: { left: 0, right: 0 },
     straightReds: { left: 0, right: 0 },
+    offsides: { left: 0, right: 0 },
   };
   let lastEventCount = 0;
 
@@ -110,20 +111,24 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
     const obs = stepResult.observation.rawVector;
     const rew = stepResult.reward;
 
-    // Track card events
+    // Track card and offside events
     for (let e = lastEventCount; e < engine.events.length; e++) {
       const evt = engine.events[e];
       if (evt.type === 'foul' && evt.team) {
-        cumulativeStats.fouls[evt.team]++;
-        if (evt.description.includes('Second yellow')) {
-          cumulativeStats.yellowCards[evt.team]++;
-          cumulativeStats.redCards[evt.team]++;
-          cumulativeStats.secondYellows[evt.team]++;
-        } else if (evt.description.includes('Yellow card')) {
-          cumulativeStats.yellowCards[evt.team]++;
-        } else if (evt.description.includes('RED CARD')) {
-          cumulativeStats.redCards[evt.team]++;
-          cumulativeStats.straightReds[evt.team]++;
+        if (evt.description.includes('offside')) {
+          cumulativeStats.offsides[evt.team]++;
+        } else {
+          cumulativeStats.fouls[evt.team]++;
+          if (evt.description.includes('Second yellow')) {
+            cumulativeStats.yellowCards[evt.team]++;
+            cumulativeStats.redCards[evt.team]++;
+            cumulativeStats.secondYellows[evt.team]++;
+          } else if (evt.description.includes('Yellow card')) {
+            cumulativeStats.yellowCards[evt.team]++;
+          } else if (evt.description.includes('RED CARD')) {
+            cumulativeStats.redCards[evt.team]++;
+            cumulativeStats.straightReds[evt.team]++;
+          }
         }
       }
     }
@@ -197,9 +202,10 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
   const rewardStd = Math.sqrt(Math.max(0, rewardVariance));
 
   console.log('\n==================================================');
-  console.log('4. FOULS AND CARDS AUDIT (over 100,000 steps)');
+  console.log('4. FOULS, CARDS, AND OFFSIDES AUDIT (over 100,000 steps)');
   console.log('==================================================');
   console.log(`- Total Fouls Committed: Left: ${cumulativeStats.fouls.left}, Right: ${cumulativeStats.fouls.right}`);
+  console.log(`- Offsides Called:       Left: ${cumulativeStats.offsides.left}, Right: ${cumulativeStats.offsides.right}`);
   console.log(`- Yellow Cards Shown:    Left: ${cumulativeStats.yellowCards.left}, Right: ${cumulativeStats.yellowCards.right}`);
   console.log(`- Red Cards Shown:       Left: ${cumulativeStats.redCards.left}, Right: ${cumulativeStats.redCards.right}`);
   console.log(`  * Straight Reds:       Left: ${cumulativeStats.straightReds.left}, Right: ${cumulativeStats.straightReds.right}`);
@@ -440,6 +446,11 @@ function auditGameModes() {
   console.log('5. CARD MECHANICS UNIT VERIFICATION');
   console.log('==================================================');
   auditCardMechanics();
+
+  console.log('\n==================================================');
+  console.log('6. OFFSIDE MECHANICS UNIT VERIFICATION');
+  console.log('==================================================');
+  auditOffsideMechanics();
 }
 
 function auditCardMechanics() {
@@ -577,6 +588,229 @@ function auditCardMechanics() {
     }
     if (!found) {
       console.log(`✗ Red Card Guard test failed to trigger`);
+    }
+  }
+}
+
+function auditOffsideMechanics() {
+  // Test 1: Standard Offside Call
+  {
+    const engine = new GameEngine();
+    engine.initDefaultMatch('4-3-3', '4-3-3', 11);
+    const passer = engine.players.find((p) => p.id === 'left_10') || engine.players[1];
+    const receiver = engine.players.find((p) => p.id === 'left_11') || engine.players[2];
+    const gk = engine.players.find((p) => p.team === 'right' && p.isGoalkeeper)!;
+    const defender = engine.players.find((p) => p.team === 'right' && !p.isGoalkeeper)!;
+
+    // Position players:
+    // Passer in opponent half at 0.2
+    // Defender at 0.45, GK at 0.95 (offside line = 0.45)
+    // Receiver in offside position at 0.65
+    passer.position = { x: 0.2, y: 0.0 };
+    passer.targetPosition = { x: 0.2, y: 0.0 };
+    passer.hasBall = true;
+    engine.ball.position = { x: 0.2, y: 0.0, z: 0 };
+    engine.ball.ownerId = passer.id;
+
+    receiver.position = { x: 0.65, y: 0.0 };
+    receiver.targetPosition = { x: 0.65, y: 0.0 };
+    receiver.hasBall = false;
+
+    defender.position = { x: 0.45, y: 0.2 };
+    defender.targetPosition = { x: 0.45, y: 0.2 };
+    gk.position = { x: 0.95, y: 0.0 };
+    gk.targetPosition = { x: 0.95, y: 0.0 };
+
+    // Move all other players far away
+    engine.players.forEach((p) => {
+      if (p.id !== passer.id && p.id !== receiver.id && p.id !== defender.id && p.id !== gk.id) {
+        p.position = { x: -0.5, y: -0.3 };
+        p.targetPosition = { x: -0.5, y: -0.3 };
+      }
+    });
+
+    engine.gameMode = GameMode.Normal;
+    engine.step(new Map([[passer.id, { type: ActionType.SHORT_PASS, direction: { x: 1, y: 0 }, power: 0.95 }]]), 1 / 60);
+
+    // Ball moves towards receiver at 0.65
+    let offsideTriggered = false;
+    for (let step = 0; step < 120; step++) {
+      engine.step(new Map(), 1 / 60);
+      if (engine.gameMode === GameMode.FreeKick) {
+        const offsideEvent = engine.events.find((e) => e.description.includes('was offside!'));
+        if (offsideEvent && engine.stats.completedPasses.left === 0) {
+          offsideTriggered = true;
+          break;
+        }
+      }
+    }
+
+    if (offsideTriggered) {
+      console.log(`✓ Standard Offside (attacker ahead of 2nd-last defender in opponent half -> Free Kick awarded at receiver pos, completedPasses not incremented): PASS`);
+    } else {
+      console.log(`✗ Standard Offside test failed`);
+    }
+  }
+
+  // Test 2: Restart Exemption (GoalKick / Corner / ThrowIn)
+  {
+    const engine = new GameEngine();
+    engine.initDefaultMatch('4-3-3', '4-3-3', 11);
+    const passer = engine.players.find((p) => p.id === 'left_10') || engine.players[1];
+    const receiver = engine.players.find((p) => p.id === 'left_11') || engine.players[2];
+    const gk = engine.players.find((p) => p.team === 'right' && p.isGoalkeeper)!;
+    const defender = engine.players.find((p) => p.team === 'right' && !p.isGoalkeeper)!;
+
+    passer.position = { x: 0.2, y: 0.0 };
+    passer.targetPosition = { x: 0.2, y: 0.0 };
+    passer.hasBall = true;
+    engine.ball.position = { x: 0.2, y: 0.0, z: 0 };
+    engine.ball.ownerId = passer.id;
+
+    receiver.position = { x: 0.65, y: 0.0 };
+    receiver.targetPosition = { x: 0.65, y: 0.0 };
+    receiver.hasBall = false;
+
+    defender.position = { x: 0.45, y: 0.2 };
+    defender.targetPosition = { x: 0.45, y: 0.2 };
+    gk.position = { x: 0.95, y: 0.0 };
+    gk.targetPosition = { x: 0.95, y: 0.0 };
+
+    engine.players.forEach((p) => {
+      if (p.id !== passer.id && p.id !== receiver.id && p.id !== defender.id && p.id !== gk.id) {
+        p.position = { x: -0.5, y: -0.3 };
+        p.targetPosition = { x: -0.5, y: -0.3 };
+      }
+    });
+
+    // Directly set mode to ThrowIn restart
+    engine.gameMode = GameMode.ThrowIn;
+    engine.step(new Map([[passer.id, { type: ActionType.SHORT_PASS, direction: { x: 1, y: 0 }, power: 0.95 }]]), 1 / 60);
+
+    let passCompleted = false;
+    let offsideCalled = false;
+    for (let step = 0; step < 120; step++) {
+      engine.step(new Map(), 1 / 60);
+      if (engine.events.some((e) => e.description.includes('was offside!'))) {
+        offsideCalled = true;
+      }
+      if (engine.stats.completedPasses.left === 1 && receiver.hasBall) {
+        passCompleted = true;
+        break;
+      }
+    }
+
+    if (!offsideCalled && passCompleted) {
+      console.log(`✓ Restart Exemption (pass played directly from ThrowIn/Corner/GoalKick with teammate in offside position -> no offside called, pass completed): PASS`);
+    } else {
+      console.log(`✗ Restart Exemption test failed (offsideCalled: ${offsideCalled}, passCompleted: ${passCompleted})`);
+    }
+  }
+
+  // Test 3: Onside Pass (receiver behind offside line)
+  {
+    const engine = new GameEngine();
+    engine.initDefaultMatch('4-3-3', '4-3-3', 11);
+    const passer = engine.players.find((p) => p.id === 'left_10') || engine.players[1];
+    const receiver = engine.players.find((p) => p.id === 'left_11') || engine.players[2];
+    const gk = engine.players.find((p) => p.team === 'right' && p.isGoalkeeper)!;
+    const defender = engine.players.find((p) => p.team === 'right' && !p.isGoalkeeper)!;
+
+    passer.position = { x: 0.1, y: 0.0 };
+    passer.targetPosition = { x: 0.1, y: 0.0 };
+    passer.hasBall = true;
+    engine.ball.position = { x: 0.1, y: 0.0, z: 0 };
+    engine.ball.ownerId = passer.id;
+
+    // Receiver at 0.35 is onside (defender at 0.50)
+    receiver.position = { x: 0.35, y: 0.0 };
+    receiver.targetPosition = { x: 0.35, y: 0.0 };
+    receiver.hasBall = false;
+
+    defender.position = { x: 0.50, y: 0.2 };
+    defender.targetPosition = { x: 0.50, y: 0.2 };
+    gk.position = { x: 0.95, y: 0.0 };
+    gk.targetPosition = { x: 0.95, y: 0.0 };
+
+    engine.players.forEach((p) => {
+      if (p.id !== passer.id && p.id !== receiver.id && p.id !== defender.id && p.id !== gk.id) {
+        p.position = { x: -0.5, y: -0.3 };
+        p.targetPosition = { x: -0.5, y: -0.3 };
+      }
+    });
+
+    engine.gameMode = GameMode.Normal;
+    engine.step(new Map([[passer.id, { type: ActionType.SHORT_PASS, direction: { x: 1, y: 0 }, power: 0.75 }]]), 1 / 60);
+
+    let passCompleted = false;
+    let offsideCalled = false;
+    for (let step = 0; step < 120; step++) {
+      engine.step(new Map(), 1 / 60);
+      if (engine.events.some((e) => e.description.includes('was offside!'))) {
+        offsideCalled = true;
+      }
+      if (engine.stats.completedPasses.left === 1 && receiver.hasBall) {
+        passCompleted = true;
+        break;
+      }
+    }
+
+    if (!offsideCalled && passCompleted) {
+      console.log(`✓ Onside Pass (receiver behind 2nd-last defender -> no offside called, pass completed): PASS`);
+    } else {
+      console.log(`✗ Onside Pass test failed`);
+    }
+  }
+
+  // Test 4: Onside in Own Half
+  {
+    const engine = new GameEngine();
+    engine.initDefaultMatch('4-3-3', '4-3-3', 11);
+    const passer = engine.players.find((p) => p.id === 'left_10') || engine.players[1];
+    const receiver = engine.players.find((p) => p.id === 'left_11') || engine.players[2];
+
+    // Both players in own half (x < 0 for left team)
+    passer.position = { x: -0.4, y: 0.0 };
+    passer.targetPosition = { x: -0.4, y: 0.0 };
+    passer.hasBall = true;
+    engine.ball.position = { x: -0.4, y: 0.0, z: 0 };
+    engine.ball.ownerId = passer.id;
+
+    receiver.position = { x: -0.15, y: 0.0 };
+    receiver.targetPosition = { x: -0.15, y: 0.0 };
+    receiver.hasBall = false;
+
+    // All defenders also pushed up past receiver (e.g. at x = 0.2)
+    engine.players.forEach((p) => {
+      if (p.team === 'right') {
+        p.position = { x: 0.2, y: 0.0 };
+        p.targetPosition = { x: 0.2, y: 0.0 };
+      } else if (p.id !== passer.id && p.id !== receiver.id) {
+        p.position = { x: -0.6, y: -0.3 };
+        p.targetPosition = { x: -0.6, y: -0.3 };
+      }
+    });
+
+    engine.gameMode = GameMode.Normal;
+    engine.step(new Map([[passer.id, { type: ActionType.SHORT_PASS, direction: { x: 1, y: 0 }, power: 0.75 }]]), 1 / 60);
+
+    let passCompleted = false;
+    let offsideCalled = false;
+    for (let step = 0; step < 120; step++) {
+      engine.step(new Map(), 1 / 60);
+      if (engine.events.some((e) => e.description.includes('was offside!'))) {
+        offsideCalled = true;
+      }
+      if (engine.stats.completedPasses.left === 1 && receiver.hasBall) {
+        passCompleted = true;
+        break;
+      }
+    }
+
+    if (!offsideCalled && passCompleted) {
+      console.log(`✓ Own Half Exemption (attacker in own half x < 0 -> no offside called, pass completed): PASS`);
+    } else {
+      console.log(`✗ Own Half Exemption test failed`);
     }
   }
 }

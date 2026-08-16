@@ -19,7 +19,7 @@ import {
   Vector2D,
   Vector3D,
 } from '../types/football';
-import { PITCH, getFormationPositions } from './Rules';
+import { PITCH, getFormationPositions, computeOffsideLineX } from './Rules';
 import { PhysicsEngine } from './Physics';
 import { Vec2, Vec3 } from './Vector';
 import { ObservationEncoder } from './ObservationEncoder';
@@ -90,7 +90,12 @@ export class GameEngine {
 
   private possessionTicks = { left: 0, right: 0 };
   private goalResetTimer = 0;
-  private currentPassTracking: { passerId: string; team: TeamSide; targetId?: string } | null = null;
+  private currentPassTracking: {
+    passerId: string;
+    team: TeamSide;
+    targetId?: string;
+    offsideReceiverIds: Set<string>;
+  } | null = null;
 
   constructor() {
     this.ball = this.createDefaultBall();
@@ -125,6 +130,7 @@ export class GameEngine {
     this.replayBuffer = [];
     this.possessionTicks = { left: 0, right: 0 };
     this.stats = this.createDefaultStats();
+    this.currentPassTracking = null;
     this.activeScenario = null;
 
     this.teamLeftConfig.formation = leftFormation;
@@ -244,6 +250,7 @@ export class GameEngine {
     this.replayBuffer = [];
     this.possessionTicks = { left: 0, right: 0 };
     this.stats = this.createDefaultStats();
+    this.currentPassTracking = null;
     this.gameMode = scenario.id.startsWith('academy') ? GameMode.Normal : GameMode.KickOff;
 
     this.ball.position = { ...scenario.setup.ball };
@@ -508,6 +515,8 @@ export class GameEngine {
       player.stickyDirection = null;
     }
 
+    const modeBeforeReset = this.gameMode;
+
     // If active action is taken during any non-Normal gameMode, transition back to Normal mode
     if (this.gameMode !== GameMode.Normal && action.type !== ActionType.IDLE) {
       this.gameMode = GameMode.Normal;
@@ -558,6 +567,7 @@ export class GameEngine {
             passerId: player.id,
             team: player.team,
             targetId: action.targetPlayerId,
+            offsideReceiverIds: this.computeOffsideReceivers(player, modeBeforeReset),
           };
 
           this.recordEvent('pass', `${player.name} played short pass`, player.position, player.team);
@@ -577,6 +587,7 @@ export class GameEngine {
             passerId: player.id,
             team: player.team,
             targetId: action.targetPlayerId,
+            offsideReceiverIds: this.computeOffsideReceivers(player, modeBeforeReset),
           };
 
           this.recordEvent('pass', `${player.name} launched ${action.type === ActionType.LONG_PASS ? 'long' : 'high'} pass`, player.position, player.team);
@@ -727,6 +738,43 @@ export class GameEngine {
     }
   }
 
+  private computeOffsideReceivers(passer: Player, modeBeforeReset: GameMode): Set<string> {
+    const offsideReceivers = new Set<string>();
+
+    // Exempt if pass is played directly from GoalKick, Corner, or ThrowIn
+    if (
+      modeBeforeReset === GameMode.GoalKick ||
+      modeBeforeReset === GameMode.Corner ||
+      modeBeforeReset === GameMode.ThrowIn
+    ) {
+      return offsideReceivers;
+    }
+
+    const defendingTeam: TeamSide = passer.team === 'left' ? 'right' : 'left';
+    const defendingPlayers = this.players.filter((p) => p.team === defendingTeam);
+    const offsideLineX = computeOffsideLineX(defendingPlayers, defendingTeam);
+
+    const teammates = this.players.filter((p) => p.team === passer.team && p.id !== passer.id);
+    for (const teammate of teammates) {
+      let isOffside = false;
+      if (passer.team === 'left') {
+        isOffside =
+          teammate.position.x > Math.max(this.ball.position.x, offsideLineX) &&
+          teammate.position.x > 0;
+      } else {
+        isOffside =
+          teammate.position.x < Math.min(this.ball.position.x, offsideLineX) &&
+          teammate.position.x < 0;
+      }
+
+      if (isOffside) {
+        offsideReceivers.add(teammate.id);
+      }
+    }
+
+    return offsideReceivers;
+  }
+
   private checkBallPossession(): void {
     if (this.ball.isInAir && this.ball.position.z > 0.04) {
       return; // Ball too high to be controlled on ground
@@ -744,6 +792,25 @@ export class GameEngine {
           // If a pass was in progress
           if (this.currentPassTracking) {
             if (this.currentPassTracking.team === player.team) {
+              if (this.currentPassTracking.offsideReceiverIds.has(player.id)) {
+                // Offside call!
+                const defendingTeam: TeamSide = player.team === 'left' ? 'right' : 'left';
+                const defendingTeamLabel = defendingTeam === 'left' ? 'Left' : 'Right';
+                this.gameMode = GameMode.FreeKick;
+                this.ball.position = { x: player.position.x, y: player.position.y, z: 0 };
+                this.ball.velocity = { x: 0, y: 0, z: 0 };
+                this.ball.ownerId = null;
+                this.players.forEach((p) => (p.hasBall = false));
+                this.recordEvent(
+                  'foul',
+                  `${player.name} was offside! Free kick awarded to Team ${defendingTeamLabel}.`,
+                  player.position,
+                  player.team
+                );
+                this.currentPassTracking = null;
+                break;
+              }
+
               if (this.currentPassTracking.passerId !== player.id) {
                 this.stats.completedPasses[player.team]++;
               }

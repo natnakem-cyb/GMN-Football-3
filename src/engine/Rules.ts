@@ -1,4 +1,4 @@
-import { FormationNode, FormationType, PlayerRole, TeamSide, Vector2D } from '../types/football';
+import { FormationNode, FormationType, Player, PlayerRole, TeamSide, Vector2D } from '../types/football';
 
 // Google Research Football standard coordinate system:
 // Pitch extends from x: -1.0 to 1.0 (length = 2.0), y: -0.42 to 0.42 (width = 0.84)
@@ -133,4 +133,23 @@ export function getFormationPositions(
       pos: { x, y },
     };
   });
+}
+
+/**
+ * Computes the x-coordinate of the offside line for the defending team.
+ * The offside line is the position of the second-deepest defending player.
+ */
+export function computeOffsideLineX(defendingTeamPlayers: Player[], defendingTeam: TeamSide): number {
+  if (defendingTeamPlayers.length === 0) return 0;
+  if (defendingTeamPlayers.length === 1) return defendingTeamPlayers[0].position.x;
+
+  if (defendingTeam === 'right') {
+    // Defends x ≈ maxX (1.0). Sort descending by x (deepest defenders first).
+    const sorted = [...defendingTeamPlayers].sort((a, b) => b.position.x - a.position.x);
+    return sorted[1].position.x;
+  } else {
+    // Defends x ≈ minX (-1.0). Sort ascending by x (deepest defenders first).
+    const sorted = [...defendingTeamPlayers].sort((a, b) => a.position.x - b.position.x);
+    return sorted[1].position.x;
+  }
 }
