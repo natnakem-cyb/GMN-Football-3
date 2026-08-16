@@ -45,7 +45,22 @@ export class RuleBasedAgent implements IAgent {
         lateralOffset <= xDistToGoal * ANGLE_MULTIPLIER + PITCH.goalWidth;
 
       if (trueDistToGoal < SHOT_RANGE && hasReasonableAngle) {
-        const goalCenter: Vector2D = { x: opponentGoalX, y: (rnd() - 0.5) * 0.09 };
+        const keeper = opponents.find((o) => o.isGoalkeeper);
+        let targetY: number;
+
+        if (keeper) {
+          const keeperY = keeper.position.y;
+          // Aim for whichever post has more room relative to the keeper's current position
+          const preferredSide = keeperY >= 0 ? -1 : 1;
+          const postMargin = 0.015; // stay just inside the frame, not right at the edge
+          const postY = preferredSide * (PITCH.goalWidth / 2 - postMargin); // ±0.055
+          targetY = postY + (rnd() - 0.5) * 0.02; // small jitter around the chosen post
+        } else {
+          // No goalkeeper in this scenario — no one to beat, wider variance is fine
+          targetY = (rnd() - 0.5) * PITCH.goalWidth * 0.8;
+        }
+
+        const goalCenter: Vector2D = { x: opponentGoalX, y: targetY };
         const shootDir = Vec2.sub(goalCenter, player.position);
         
         // Random shot variance based on difficulty

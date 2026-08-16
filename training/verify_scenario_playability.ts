@@ -17,6 +17,9 @@ export interface ScenarioPlayabilityResult {
   leftShotAttemptsPerEpisode: number;
   turnoverCount: number; // episodes ending via opponent-possession termination, not a goal or timeout
   turnoverRate: number;  // turnoverCount / episodesRun
+  savedOrMissedTurnovers: number; // episodes with >=1 shot taken that ended in a turnover
+  noShotTurnovers: number; // episodes with 0 shots taken that ended in a turnover
+  timeouts: number;
   objectiveCompletions: Record<string, { text: string; completedCount: number; rate: number }>;
 }
 
@@ -42,6 +45,9 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
     let rightGoalsTotal = 0;
     let leftShotAttempts = 0;
     let turnoverCount = 0;
+    let savedOrMissedTurnovers = 0;
+    let noShotTurnovers = 0;
+    let timeouts = 0;
 
     const objectiveTracker: Record<string, { text: string; count: number }> = {};
     scenario.objectives.forEach((obj) => {
@@ -61,6 +67,7 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
         const maxSteps = Math.ceil(scenario.timeLimitSeconds * 60) + 120;
         let epDone = false;
         let stepCount = 0;
+        let epLeftShots = 0;
         let lastTerminated = false;
         let lastTruncated = false;
 
@@ -89,6 +96,7 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
             const action = agent.decide(context);
             if (player.team === 'left' && action.type === ActionType.SHOT) {
               leftShotAttempts++;
+              epLeftShots++;
             }
             actionMap.set(player.id, action);
           }
@@ -108,12 +116,18 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
         rightGoalsTotal += engine.score.right;
 
         // Classify episode termination:
-        // A goal ended it?
         const goalScored = engine.score.left > 0 || engine.score.right > 0;
         if (!goalScored) {
           if (lastTerminated) {
             // Terminated without a goal (e.g. opponent possession / out of bounds in scenario)
             turnoverCount++;
+            if (epLeftShots > 0) {
+              savedOrMissedTurnovers++;
+            } else {
+              noShotTurnovers++;
+            }
+          } else if (lastTruncated) {
+            timeouts++;
           }
         }
 
@@ -159,6 +173,9 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
       leftShotAttemptsPerEpisode: Math.round(leftShotAttemptsPerEpisode * 100) / 100,
       turnoverCount,
       turnoverRate: Math.round(turnoverRate * 10) / 10,
+      savedOrMissedTurnovers,
+      noShotTurnovers,
+      timeouts,
       objectiveCompletions: objectiveSummary,
     };
 
@@ -168,7 +185,10 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
     console.log(`Avg Duration: ${summary.avgEpisodeLengthSec}s (${summary.avgEpisodeLengthSteps} steps)`);
     console.log(`Goals Scored: Left: ${summary.leftGoalsTotal} (${summary.leftGoalRate}%), Right: ${summary.rightGoalsTotal}`);
     console.log(`Shot Attempts (Left): Total: ${summary.leftShotAttempts} (${summary.leftShotAttemptsPerEpisode}/ep)`);
-    console.log(`Turnovers (No-Goal Terminations): ${summary.turnoverCount}/${summary.episodesRun} (${summary.turnoverRate}%)`);
+    console.log(
+      `Turnovers (No-Goal Terminations): ${summary.turnoverCount}/${summary.episodesRun} (${summary.turnoverRate}%)` +
+        ` [Saved/Missed Shot: ${summary.savedOrMissedTurnovers}, No Shot Taken: ${summary.noShotTurnovers}, Timeouts: ${summary.timeouts}]`
+    );
     console.log(`Objectives:`);
     for (const [id, obj] of Object.entries(summary.objectiveCompletions)) {
       console.log(`  - [${id}] "${obj.text}": ${obj.completedCount}/${summary.episodesRun} (${obj.rate.toFixed(1)}%)`);
