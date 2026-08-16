@@ -20,6 +20,7 @@
     "test:ppo": "python3 training/train_ppo.py 1000",
     "test:audit": "tsx training/audit_observations_and_actions.ts",
     "test:scripted": "tsx training/scripted_eval.ts",
+    "test:playability": "tsx training/verify_scenario_playability.ts",
     "test:validation": "python3 training/rl_validation_suite.py"
   },
   "dependencies": {

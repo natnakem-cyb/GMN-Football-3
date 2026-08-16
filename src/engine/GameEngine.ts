@@ -507,10 +507,13 @@ export class GameEngine {
       player.isDribbling = false;
     }
 
-    if (action.type === ActionType.MOVE) {
-      if (action.direction) {
-        player.stickyDirection = { ...action.direction };
-      }
+    if (
+      (action.type === ActionType.MOVE ||
+        action.type === ActionType.SPRINT ||
+        action.type === ActionType.DRIBBLE) &&
+      action.direction
+    ) {
+      player.stickyDirection = { ...action.direction };
     } else if (action.type === ActionType.RELEASE_DIRECTION) {
       player.stickyDirection = null;
     }
@@ -528,14 +531,18 @@ export class GameEngine {
     // 2. Handle specific action types
     switch (action.type) {
       case ActionType.MOVE:
-        if (action.direction) {
-          const speedMultiplier = player.isSprinting ? 1.3 : player.isDribbling ? 0.6 : 1.0;
-          const stepDist = (player.stats.speed / 100) * 0.15 * speedMultiplier;
-          player.targetPosition = {
-            x: player.position.x + action.direction.x * stepDist,
-            y: player.position.y + action.direction.y * stepDist,
-          };
-          player.heading = Vec2.angle(action.direction);
+      case ActionType.SPRINT:
+        {
+          const dir = action.direction || (player.stickyDirection ? player.stickyDirection : null);
+          if (dir) {
+            const speedMultiplier = player.isSprinting ? 1.3 : player.isDribbling ? 0.6 : 1.0;
+            const stepDist = (player.stats.speed / 100) * 0.15 * speedMultiplier;
+            player.targetPosition = {
+              x: player.position.x + dir.x * stepDist,
+              y: player.position.y + dir.y * stepDist,
+            };
+            player.heading = Vec2.angle(dir);
+          }
         }
         break;
 
