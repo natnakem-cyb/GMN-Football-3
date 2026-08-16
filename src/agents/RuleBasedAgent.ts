@@ -45,27 +45,31 @@ export class RuleBasedAgent implements IAgent {
         lateralOffset <= xDistToGoal * ANGLE_MULTIPLIER + PITCH.goalWidth;
 
       if (trueDistToGoal < SHOT_RANGE && hasReasonableAngle) {
+        const FRAME_SAFETY_MARGIN = 0.01; // stay slightly inside the physical posts
+        const maxSafeY = PITCH.goalWidth / 2 - FRAME_SAFETY_MARGIN;
+
         const keeper = opponents.find((o) => o.isGoalkeeper);
         let targetY: number;
 
         if (keeper) {
           const keeperY = keeper.position.y;
-          // Aim for whichever post has more room relative to the keeper's current position
           const preferredSide = keeperY >= 0 ? -1 : 1;
-          const postMargin = 0.015; // stay just inside the frame, not right at the edge
-          const postY = preferredSide * (PITCH.goalWidth / 2 - postMargin); // ±0.055
-          targetY = postY + (rnd() - 0.5) * 0.02; // small jitter around the chosen post
+          const postMargin = 0.015;
+          const postY = preferredSide * (PITCH.goalWidth / 2 - postMargin);
+          targetY = postY + (rnd() - 0.5) * 0.02;
         } else {
-          // No goalkeeper in this scenario — no one to beat, wider variance is fine
           targetY = (rnd() - 0.5) * PITCH.goalWidth * 0.8;
         }
 
+        const variance = this.difficulty === 'master' ? 0.01 : this.difficulty === 'hard' ? 0.03 : 0.07;
+        targetY += (rnd() - 0.5) * variance;
+
+        // Final arrival y at the goal line reduces to targetY exactly, since shootDir.x
+        // is unchanged — clamp once here rather than re-tuning each branch's constants.
+        targetY = Math.max(-maxSafeY, Math.min(maxSafeY, targetY));
+
         const goalCenter: Vector2D = { x: opponentGoalX, y: targetY };
         const shootDir = Vec2.sub(goalCenter, player.position);
-        
-        // Random shot variance based on difficulty
-        const variance = this.difficulty === 'master' ? 0.01 : this.difficulty === 'hard' ? 0.03 : 0.07;
-        shootDir.y += (rnd() - 0.5) * variance;
 
         return {
           type: ActionType.SHOT,
