@@ -12,9 +12,11 @@
     "headless": "tsx training/benchmark.ts",
     "benchmark": "tsx training/benchmark.ts",
     "benchmark:bridge": "python3 training/benchmark_bridge.py",
+    "benchmark:ws": "python3 training/benchmark_bridge_ws.py",
     "test": "tsx training/test_scenarios.ts && tsx training/test_determinism.ts",
     "test:scenarios": "tsx training/test_scenarios.ts",
     "test:determinism": "tsx training/test_determinism.ts",
+    "test:parity": "python3 training/test_transport_parity.py",
     "test:e2e": "python3 training/test_e2e_determinism.py",
     "test:env": "python3 training/test_env.py",
     "test:ppo": "python3 training/train_ppo.py 1000",
@@ -30,12 +32,14 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "recharts": "^2.12.7",
-    "tailwind-merge": "^2.2.1"
+    "tailwind-merge": "^2.2.1",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/node": "^20.11.24",
     "@types/react": "^18.2.61",
     "@types/react-dom": "^18.2.19",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.18",
     "postcss": "^8.4.35",

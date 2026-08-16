@@ -1,4 +1,5 @@
 import http from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
 import { GameEngine } from '../src/engine/GameEngine';
 import { ACADEMY_SCENARIOS } from '../src/scenarios/ScenarioRegistry';
 import { ActionType, AgentAction, ScenarioConfig } from '../src/types/football';
@@ -9,6 +10,7 @@ import {
   ACTION_SCHEMA_VERSION,
   OBSERVATION_DIM,
   ACTION_SPACE_SIZE,
+  getEventCode,
 } from '../src/engine/Contract';
 import { Vec2 } from '../src/engine/Vector';
 import { RuleBasedAgent } from '../src/agents/RuleBasedAgent';
@@ -205,6 +207,74 @@ const server = http.createServer((req, res) => {
   });
 });
 
+// Binary step-response layout: 477 bytes total, all little-endian
+// Offset 0 (4B float32): reward
+// Offset 4 (1B uint8): terminated (0/1)
+// Offset 5 (1B uint8): truncated (0/1)
+// Offset 6 (1B uint8): scoreLeft
+// Offset 7 (1B uint8): scoreRight
+// Offset 8 (4B float32): checkpointReward
+// Offset 12 (4B float32): ballDistanceToGoal
+// Offset 16 (1B uint8): eventCode
+// Offset 17 (460B): 115 * float32 observation
+function encodeStepBinary(stepResult: ReturnType<typeof bridge.step>): Buffer {
+  const buf = Buffer.allocUnsafe(477);
+  buf.writeFloatLE(stepResult.reward || 0.0, 0);
+  buf.writeUInt8(stepResult.terminated ? 1 : 0, 4);
+  buf.writeUInt8(stepResult.truncated ? 1 : 0, 5);
+  buf.writeUInt8(Math.max(0, Math.min(255, stepResult.info.score?.left ?? 0)), 6);
+  buf.writeUInt8(Math.max(0, Math.min(255, stepResult.info.score?.right ?? 0)), 7);
+  buf.writeFloatLE(stepResult.info.checkpointReward ?? 0.0, 8);
+  buf.writeFloatLE(stepResult.info.ballDistanceToGoal ?? 0.0, 12);
+
+  const eventType = stepResult.info.event?.type;
+  const eventCode = getEventCode(eventType);
+  buf.writeUInt8(eventCode, 16);
+
+  const obs = stepResult.observation;
+  for (let i = 0; i < OBSERVATION_DIM; i++) {
+    buf.writeFloatLE(obs[i] ?? 0.0, 17 + i * 4);
+  }
+
+  return buf;
+}
+
+// Attach WebSocket Server to the same HTTP Server instance
+const wss = new WebSocketServer({ server });
+
+wss.on('connection', (ws: WebSocket) => {
+  ws.on('message', (data: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
+    try {
+      if (isBinary) {
+        const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as any);
+        if (buf.length < 1) return;
+        const actionIdx = buf.readUInt8(0);
+        if (actionIdx >= ACTION_SPACE_SIZE) return;
+
+        const stepResult = bridge.step(actionIdx);
+        const respBuf = encodeStepBinary(stepResult);
+        ws.send(respBuf, { binary: true });
+      } else {
+        const text = data.toString('utf8');
+        const parsed = JSON.parse(text);
+        if (parsed.type === 'reset') {
+          const resetResult = bridge.reset(parsed.scenario, parsed.seed);
+          ws.send(JSON.stringify(resetResult));
+        } else if (parsed.type === 'close') {
+          ws.close();
+        } else if (parsed.type === 'info') {
+          ws.send(JSON.stringify(bridge.getInfo()));
+        } else if (parsed.type === 'step') {
+          const stepResult = bridge.step(parsed.action);
+          ws.send(JSON.stringify(stepResult));
+        }
+      }
+    } catch (err: any) {
+      console.error('[WS Error]', err);
+    }
+  });
+});
+
 server.keepAliveTimeout = 120000;
 server.headersTimeout = 125000;
 server.on('error', (err) => {
@@ -212,7 +282,7 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`[GMN Headless Bridge] Server listening on http://${HOST}:${PORT}`);
+  console.log(`[GMN Headless Bridge] Server listening on http://${HOST}:${PORT} (HTTP + Binary WebSocket)`);
 });
 
 process.on('SIGINT', () => {
