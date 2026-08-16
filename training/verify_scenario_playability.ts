@@ -15,6 +15,9 @@ export interface ScenarioPlayabilityResult {
   leftGoalRate: number;
   leftShotAttempts: number;
   leftShotAttemptsPerEpisode: number;
+  savedCleanTotal: number;
+  parriedAttackerRecoveredTotal: number;
+  parriedDefenseRecoveredTotal: number;
   turnoverCount: number; // episodes ending via opponent-possession termination, not a goal or timeout
   turnoverRate: number;  // turnoverCount / episodesRun
   savedOrMissedTurnovers: number; // episodes with >=1 shot taken that ended in a turnover
@@ -44,6 +47,9 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
     let leftGoalsTotal = 0;
     let rightGoalsTotal = 0;
     let leftShotAttempts = 0;
+    let savedCleanTotal = 0;
+    let parriedAttackerRecoveredTotal = 0;
+    let parriedDefenseRecoveredTotal = 0;
     let turnoverCount = 0;
     let savedOrMissedTurnovers = 0;
     let noShotTurnovers = 0;
@@ -70,6 +76,8 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
         let epLeftShots = 0;
         let lastTerminated = false;
         let lastTruncated = false;
+        let lastEventCount = 0;
+        let pendingParry = false;
 
         while (!epDone && stepCount < maxSteps) {
           stepCount++;
@@ -101,11 +109,42 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
             actionMap.set(player.id, action);
           }
 
+          const prevOwner = engine.ball.ownerId;
           const stepRes = engine.step(actionMap, 1 / 60);
           lastTerminated = !!stepRes.terminated;
           lastTruncated = !!stepRes.truncated;
 
+          // Check new events
+          const newEvents = engine.events.slice(lastEventCount);
+          lastEventCount = engine.events.length;
+
+          for (const ev of newEvents) {
+            if (ev.type === 'shot_saved') {
+              pendingParry = true;
+            }
+          }
+
+          // Check who got possession after parry or clean save
+          if (engine.ball.ownerId && engine.ball.ownerId !== prevOwner) {
+            const newOwner = engine.players.find((p) => p.id === engine.ball.ownerId);
+            if (pendingParry) {
+              if (newOwner?.team === 'left') {
+                parriedAttackerRecoveredTotal++;
+                pendingParry = false;
+              } else if (newOwner?.team === 'right') {
+                parriedDefenseRecoveredTotal++;
+                pendingParry = false;
+              }
+            } else if (newOwner?.isGoalkeeper && newOwner.team === 'right' && epLeftShots > 0) {
+              savedCleanTotal++;
+            }
+          }
+
           if (stepRes.terminated || stepRes.truncated) {
+            if (pendingParry) {
+              parriedDefenseRecoveredTotal++;
+              pendingParry = false;
+            }
             epDone = true;
           }
         }
@@ -171,6 +210,9 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
       leftGoalRate: Math.round(leftGoalRate * 10) / 10,
       leftShotAttempts,
       leftShotAttemptsPerEpisode: Math.round(leftShotAttemptsPerEpisode * 100) / 100,
+      savedCleanTotal,
+      parriedAttackerRecoveredTotal,
+      parriedDefenseRecoveredTotal,
       turnoverCount,
       turnoverRate: Math.round(turnoverRate * 10) / 10,
       savedOrMissedTurnovers,
@@ -185,6 +227,9 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
     console.log(`Avg Duration: ${summary.avgEpisodeLengthSec}s (${summary.avgEpisodeLengthSteps} steps)`);
     console.log(`Goals Scored: Left: ${summary.leftGoalsTotal} (${summary.leftGoalRate}%), Right: ${summary.rightGoalsTotal}`);
     console.log(`Shot Attempts (Left): Total: ${summary.leftShotAttempts} (${summary.leftShotAttemptsPerEpisode}/ep)`);
+    console.log(
+      `Shot Outcome Breakdown: Goals: ${summary.leftGoalsTotal} | Clean Saves: ${summary.savedCleanTotal} | Parried (Attacker Rebound): ${summary.parriedAttackerRecoveredTotal} | Parried (Defense Recovered): ${summary.parriedDefenseRecoveredTotal}`
+    );
     console.log(
       `Turnovers (No-Goal Terminations): ${summary.turnoverCount}/${summary.episodesRun} (${summary.turnoverRate}%)` +
         ` [Saved/Missed Shot: ${summary.savedOrMissedTurnovers}, No Shot Taken: ${summary.noShotTurnovers}, Timeouts: ${summary.timeouts}]`

@@ -112,6 +112,7 @@ export class GameEngine {
       lastOwnerId: null,
       lastOwnerTeam: null,
       isInAir: false,
+      isShotInFlight: false,
       trail: [],
     };
   }
@@ -612,6 +613,7 @@ export class GameEngine {
           const power = action.power || 0.95;
 
           PhysicsEngine.kickBall(this.ball, player, dir, power, 0.15);
+          this.ball.isShotInFlight = true;
 
           this.stats.shots[player.team]++;
           this.stats.shotsOnTarget[player.team]++;
@@ -797,6 +799,42 @@ export class GameEngine {
       const catchRadius = player.isGoalkeeper ? PITCH.goalkeeperCatchRadius : PhysicsEngine.BALL_CONTROL_DIST;
 
       if (dist < catchRadius && !player.isTackling) {
+        if (player.isGoalkeeper && this.ball.isShotInFlight) {
+          const velocity2D: Vector2D = { x: this.ball.velocity.x, y: this.ball.velocity.y };
+          const shotSpeed = Vec2.length(velocity2D);
+
+          const BASE_SAVE_CHANCE = 0.75;
+          const SPEED_PENALTY_FACTOR = 0.3;
+          const MIN_SAVE_CHANCE = 0.15;
+          const saveChance = Math.max(
+            MIN_SAVE_CHANCE,
+            BASE_SAVE_CHANCE - shotSpeed * SPEED_PENALTY_FACTOR
+          );
+
+          const roll = this.rng.next();
+
+          if (roll >= saveChance) {
+            // Save fails — parry, not a clean catch. Ball stays live.
+            const currentAngle = Vec2.angle(velocity2D);
+            const deflectAngle = currentAngle + (this.rng.next() - 0.5) * 1.2;
+            const deflectSpeed = shotSpeed * 0.35;
+            const deflected = Vec2.fromAngle(deflectAngle, deflectSpeed);
+
+            this.ball.velocity.x = deflected.x;
+            this.ball.velocity.y = deflected.y;
+
+            this.recordEvent(
+              'shot_saved',
+              `${player.name} gets a hand to it but can't hold on — parried away!`,
+              player.position,
+              player.team
+            );
+            break; // matches existing loop pattern — this player touched the ball this tick
+          }
+          // else: save succeeds, fall through to the existing possession-assignment
+          // logic below unchanged (clean catch, isShotInFlight already cleared there per §2)
+        }
+
         // If ball was unowned or changing owner
         if (this.ball.ownerId !== player.id) {
           // If a pass was in progress
@@ -810,6 +848,7 @@ export class GameEngine {
                 this.ball.position = { x: player.position.x, y: player.position.y, z: 0 };
                 this.ball.velocity = { x: 0, y: 0, z: 0 };
                 this.ball.ownerId = null;
+                this.ball.isShotInFlight = false;
                 this.players.forEach((p) => (p.hasBall = false));
                 this.recordEvent(
                   'foul',
@@ -837,6 +876,7 @@ export class GameEngine {
           this.ball.ownerId = player.id;
           this.ball.lastOwnerId = player.id;
           this.ball.lastOwnerTeam = player.team;
+          this.ball.isShotInFlight = false;
 
           // If left team gained possession and controlled player wasn't active
           if (player.team === 'left' && this.teamLeftConfig.controller === 'human') {
@@ -853,6 +893,7 @@ export class GameEngine {
 
     // Check Right Goal (Left team scores / right endline)
     if (x >= PITCH.maxX) {
+      this.ball.isShotInFlight = false;
       if (y >= PITCH.goalMinY && y <= PITCH.goalMaxY) {
         this.score.left++;
         this.stats.goals.left++;
@@ -888,6 +929,7 @@ export class GameEngine {
 
     // Check Left Goal (Right team scores / left endline)
     if (x <= PITCH.minX) {
+      this.ball.isShotInFlight = false;
       if (y >= PITCH.goalMinY && y <= PITCH.goalMaxY) {
         this.score.right++;
         this.stats.goals.right++;
@@ -923,6 +965,7 @@ export class GameEngine {
 
     // Touchlines (Y bounds) -> ThrowIn
     if (y < PITCH.minY || y > PITCH.maxY) {
+      this.ball.isShotInFlight = false;
       this.gameMode = GameMode.ThrowIn;
       const throwInTeam: TeamSide = this.ball.lastOwnerTeam === 'left' ? 'right' : 'left';
       this.ball.velocity = { x: 0, y: 0, z: 0 };
@@ -947,6 +990,7 @@ export class GameEngine {
     this.ball.position.y = Math.max(PITCH.minY + 0.02, Math.min(PITCH.maxY - 0.02, this.ball.position.y));
     this.ball.position.z = 0;
     this.ball.ownerId = null;
+    this.ball.isShotInFlight = false;
   }
 
   public resetToKickoff(): void {

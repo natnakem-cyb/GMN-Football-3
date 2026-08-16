@@ -64,6 +64,7 @@ export interface Ball {
   lastOwnerId: string | null;
   lastOwnerTeam: TeamSide | null;
   isInAir: boolean;
+  isShotInFlight: boolean;
   trail: Vector3D[];
 }
 
