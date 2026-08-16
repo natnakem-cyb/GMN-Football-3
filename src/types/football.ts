@@ -145,6 +145,9 @@ export interface MatchStats {
   completedPasses: { left: number; right: number };
   tackles: { left: number; right: number };
   interceptions: { left: number; right: number };
+  fouls: { left: number; right: number };
+  yellowCards: { left: number; right: number };
+  redCards: { left: number; right: number };
   goals: { left: number; right: number };
   possessionHistory: { time: number; left: number; right: number }[];
   shotLocations: { x: number; y: number; team: TeamSide; isGoal: boolean }[];

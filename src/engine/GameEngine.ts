@@ -63,19 +63,26 @@ export class GameEngine {
     tactics: { aggression: 0.7, pressLine: 0.6, passingDirectness: 0.6, width: 0.8 },
   };
 
-  public stats: MatchStats = {
-    possession: { left: 50, right: 50 },
-    shots: { left: 0, right: 0 },
-    shotsOnTarget: { left: 0, right: 0 },
-    passes: { left: 0, right: 0 },
-    completedPasses: { left: 0, right: 0 },
-    tackles: { left: 0, right: 0 },
-    interceptions: { left: 0, right: 0 },
-    goals: { left: 0, right: 0 },
-    possessionHistory: [],
-    shotLocations: [],
-    heatmapData: { left: [], right: [], ball: [] },
-  };
+  private createDefaultStats(): MatchStats {
+    return {
+      possession: { left: 50, right: 50 },
+      shots: { left: 0, right: 0 },
+      shotsOnTarget: { left: 0, right: 0 },
+      passes: { left: 0, right: 0 },
+      completedPasses: { left: 0, right: 0 },
+      tackles: { left: 0, right: 0 },
+      interceptions: { left: 0, right: 0 },
+      fouls: { left: 0, right: 0 },
+      yellowCards: { left: 0, right: 0 },
+      redCards: { left: 0, right: 0 },
+      goals: { left: 0, right: 0 },
+      possessionHistory: [],
+      shotLocations: [],
+      heatmapData: { left: [], right: [], ball: [] },
+    };
+  }
+
+  public stats: MatchStats = this.createDefaultStats();
 
   public replayBuffer: ReplayFrame[] = [];
   public maxReplayFrames = 3000;
@@ -117,6 +124,7 @@ export class GameEngine {
     this.events = [];
     this.replayBuffer = [];
     this.possessionTicks = { left: 0, right: 0 };
+    this.stats = this.createDefaultStats();
     this.activeScenario = null;
 
     this.teamLeftConfig.formation = leftFormation;
@@ -235,6 +243,7 @@ export class GameEngine {
     this.events = [];
     this.replayBuffer = [];
     this.possessionTicks = { left: 0, right: 0 };
+    this.stats = this.createDefaultStats();
     this.gameMode = scenario.id.startsWith('academy') ? GameMode.Normal : GameMode.KickOff;
 
     this.ball.position = { ...scenario.setup.ball };
@@ -605,6 +614,31 @@ export class GameEngine {
             this.recordEvent('tackle', `${player.name} executed a clean slide tackle!`, player.position, player.team);
           } else if (tackleResult === 'foul') {
             const fouledTeam: TeamSide = player.team === 'left' ? 'right' : 'left';
+            this.stats.fouls[player.team]++;
+
+            let cardDescription = '';
+            if (!player.redCard) {
+              const cardRoll = this.rng.next();
+              if (cardRoll >= 0.95) {
+                // Straight red card
+                player.redCard = true;
+                this.stats.redCards[player.team]++;
+                cardDescription = ` RED CARD — ${player.name} is sent off!`;
+              } else if (cardRoll >= 0.80) {
+                // Yellow card
+                if (player.yellowCards === 0) {
+                  player.yellowCards = 1;
+                  this.stats.yellowCards[player.team]++;
+                  cardDescription = ` Yellow card shown to ${player.name}.`;
+                } else if (player.yellowCards === 1) {
+                  player.yellowCards = 2;
+                  player.redCard = true;
+                  this.stats.yellowCards[player.team]++;
+                  this.stats.redCards[player.team]++;
+                  cardDescription = ` Second yellow card shown to ${player.name} — RED CARD!`;
+                }
+              }
+            }
 
             // Check if foul occurred inside the defending team's penalty box
             let inPenaltyBox = false;
@@ -633,7 +667,7 @@ export class GameEngine {
               this.ball.ownerId = null;
               this.recordEvent(
                 'foul',
-                `${player.name} committed a foul in the penalty box! PENALTY awarded to Team ${fouledTeam === 'left' ? 'Left' : 'Right'}!`,
+                `${player.name} committed a foul in the penalty box! PENALTY awarded to Team ${fouledTeam === 'left' ? 'Left' : 'Right'}!${cardDescription}`,
                 player.position,
                 player.team
               );
@@ -644,7 +678,7 @@ export class GameEngine {
               this.ball.ownerId = null;
               this.recordEvent(
                 'foul',
-                `${player.name} committed a foul! FREE KICK awarded to Team ${fouledTeam === 'left' ? 'Left' : 'Right'}`,
+                `${player.name} committed a foul! FREE KICK awarded to Team ${fouledTeam === 'left' ? 'Left' : 'Right'}.${cardDescription}`,
                 player.position,
                 player.team
               );

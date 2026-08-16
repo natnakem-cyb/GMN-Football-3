@@ -43,6 +43,16 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
   const episodeLengths: number[] = [];
   let goalsScored = 0;
 
+  // Track foul and card statistics across 100k rollout
+  const cumulativeStats = {
+    fouls: { left: 0, right: 0 },
+    yellowCards: { left: 0, right: 0 },
+    redCards: { left: 0, right: 0 },
+    secondYellows: { left: 0, right: 0 },
+    straightReds: { left: 0, right: 0 },
+  };
+  let lastEventCount = 0;
+
   // Run across all 19 actions + dynamic movements across scenarios
   for (let step = 0; step < totalSteps; step++) {
     currentEpisodeLength++;
@@ -50,13 +60,13 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
     const controlledPlayer = engine.players.find((p) => p.id === engine.controlledPlayerId) || engine.players[0];
     
     let action: AgentAction;
-    if (Math.random() < 0.4 && controlledPlayer) {
+    if (controlledPlayer) {
       const dx = engine.ball.position.x - controlledPlayer.position.x;
       const dy = engine.ball.position.y - controlledPlayer.position.y;
       const dist = Math.hypot(dx, dy);
-      if (dist < 0.08 && engine.ball.ownerId && engine.ball.ownerId !== controlledPlayer.id) {
+      if (dist < 0.15 && engine.ball.ownerId && engine.ball.ownerId !== controlledPlayer.id) {
         action = { type: ActionType.SLIDING };
-      } else if (dist > 0.02) {
+      } else if (Math.random() < 0.5 && dist > 0.02) {
         action = { type: ActionType.MOVE, direction: { x: dx / dist, y: dy / dist } };
       } else {
         action = mapDiscreteAction(actionIdx, controlledPlayer.heading);
@@ -79,14 +89,14 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
         if (engine.ball.ownerId && engine.ball.ownerId !== p.id) {
           const owner = engine.players.find((pl) => pl.id === engine.ball.ownerId);
           if (owner && owner.team !== p.team) {
-            if (dist < 0.09) {
+            if (dist < 0.15) {
               actionMap.set(p.id, { type: ActionType.SLIDING });
               continue;
             }
           }
         }
-        if (Math.random() < 0.4) {
-          if (dist > 0.05) {
+        if (Math.random() < 0.6) {
+          if (dist > 0.02) {
             actionMap.set(p.id, { type: ActionType.MOVE, direction: { x: dx / dist, y: dy / dist } });
           } else {
             const randActIdx = Math.floor(Math.random() * ACTION_SPACE_SIZE);
@@ -99,6 +109,25 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
     const stepResult = engine.step(actionMap, 1 / 60);
     const obs = stepResult.observation.rawVector;
     const rew = stepResult.reward;
+
+    // Track card events
+    for (let e = lastEventCount; e < engine.events.length; e++) {
+      const evt = engine.events[e];
+      if (evt.type === 'foul' && evt.team) {
+        cumulativeStats.fouls[evt.team]++;
+        if (evt.description.includes('Second yellow')) {
+          cumulativeStats.yellowCards[evt.team]++;
+          cumulativeStats.redCards[evt.team]++;
+          cumulativeStats.secondYellows[evt.team]++;
+        } else if (evt.description.includes('Yellow card')) {
+          cumulativeStats.yellowCards[evt.team]++;
+        } else if (evt.description.includes('RED CARD')) {
+          cumulativeStats.redCards[evt.team]++;
+          cumulativeStats.straightReds[evt.team]++;
+        }
+      }
+    }
+    lastEventCount = engine.events.length;
 
     // Reward stats
     rewardMin = Math.min(rewardMin, rew);
@@ -134,6 +163,7 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
       currentEpisodeLength = 0;
       scenarioIdx = (scenarioIdx + 1) % ACADEMY_SCENARIOS.length;
       engine.loadScenario(ACADEMY_SCENARIOS[scenarioIdx]);
+      lastEventCount = 0;
     }
   }
 
@@ -165,6 +195,15 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
   const rewardMean = rewardSum / totalRewards;
   const rewardVariance = rewardSqSum / totalRewards - rewardMean * rewardMean;
   const rewardStd = Math.sqrt(Math.max(0, rewardVariance));
+
+  console.log('\n==================================================');
+  console.log('4. FOULS AND CARDS AUDIT (over 100,000 steps)');
+  console.log('==================================================');
+  console.log(`- Total Fouls Committed: Left: ${cumulativeStats.fouls.left}, Right: ${cumulativeStats.fouls.right}`);
+  console.log(`- Yellow Cards Shown:    Left: ${cumulativeStats.yellowCards.left}, Right: ${cumulativeStats.yellowCards.right}`);
+  console.log(`- Red Cards Shown:       Left: ${cumulativeStats.redCards.left}, Right: ${cumulativeStats.redCards.right}`);
+  console.log(`  * Straight Reds:       Left: ${cumulativeStats.straightReds.left}, Right: ${cumulativeStats.straightReds.right}`);
+  console.log(`  * Second Yellow Reds:  Left: ${cumulativeStats.secondYellows.left}, Right: ${cumulativeStats.secondYellows.right}`);
 
   console.log('\n==================================================');
   console.log('8. REWARD AUDIT (over 100,000 steps)');
@@ -395,6 +434,150 @@ function auditGameModes() {
     console.log(
       `✓ ${test.name.padEnd(30, ' ')} | GameMode: ${GameMode[testEngine.gameMode]} (${testEngine.gameMode}) | OneHot[108..114]: [${modeSlice.join(', ')}] | Match: ${triggered && oneHotCorrect ? 'PASS' : 'FAIL'}`
     );
+  }
+
+  console.log('\n==================================================');
+  console.log('5. CARD MECHANICS UNIT VERIFICATION');
+  console.log('==================================================');
+  auditCardMechanics();
+}
+
+function auditCardMechanics() {
+  // Test 1: First Yellow Card
+  {
+    const engine = new GameEngine();
+    engine.loadScenario(ACADEMY_SCENARIOS.find((s) => s.id === 'academy_run_to_score')!);
+    const attacker = engine.players.find((p) => p.team === 'left')!;
+    const defender = engine.players.find((p) => p.team === 'right' && !p.isGoalkeeper)!;
+    
+    // Find seed where tackle result is foul and card roll is yellow (0.80 - 0.95)
+    let found = false;
+    for (let seed = 1; seed < 1000; seed++) {
+      engine.setSeed(seed);
+      attacker.position = { x: 0.2, y: 0.0 };
+      defender.position = { x: 0.22, y: 0.0 };
+      engine.ball.position = { x: 0.2, y: 0.0, z: 0 };
+      engine.ball.ownerId = attacker.id;
+      attacker.hasBall = true;
+      defender.tackleCooldown = 0;
+      defender.yellowCards = 0;
+      defender.redCard = false;
+      engine.stats.yellowCards.right = 0;
+      engine.stats.redCards.right = 0;
+      engine.stats.fouls.right = 0;
+
+      engine.step(new Map([[defender.id, { type: ActionType.SLIDING }]]), 1 / 60);
+      if (defender.yellowCards === 1 && !defender.redCard && engine.stats.yellowCards.right === 1 && engine.stats.redCards.right === 0) {
+        console.log(`✓ First Yellow Card (1st yellow -> player.yellowCards = 1, stays on, stats.yellowCards = 1): PASS`);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      console.log(`✗ First Yellow Card test failed to trigger`);
+    }
+  }
+
+  // Test 2: Second Yellow Card -> Red Card
+  {
+    const engine = new GameEngine();
+    engine.loadScenario(ACADEMY_SCENARIOS.find((s) => s.id === 'academy_run_to_score')!);
+    const attacker = engine.players.find((p) => p.team === 'left')!;
+    const defender = engine.players.find((p) => p.team === 'right' && !p.isGoalkeeper)!;
+    
+    let found = false;
+    for (let seed = 1; seed < 1000; seed++) {
+      engine.setSeed(seed);
+      attacker.position = { x: 0.2, y: 0.0 };
+      defender.position = { x: 0.22, y: 0.0 };
+      engine.ball.position = { x: 0.2, y: 0.0, z: 0 };
+      engine.ball.ownerId = attacker.id;
+      attacker.hasBall = true;
+      defender.tackleCooldown = 0;
+      defender.yellowCards = 1; // Already on a yellow
+      defender.redCard = false;
+      engine.stats.yellowCards.right = 1;
+      engine.stats.redCards.right = 0;
+      engine.stats.fouls.right = 1;
+
+      engine.step(new Map([[defender.id, { type: ActionType.SLIDING }]]), 1 / 60);
+      if (defender.yellowCards === 2 && defender.redCard && engine.stats.yellowCards.right === 2 && engine.stats.redCards.right === 1) {
+        console.log(`✓ Second Yellow Card (2nd yellow -> player.yellowCards = 2, player.redCard = true, stats.redCards = 1): PASS`);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      console.log(`✗ Second Yellow Card test failed to trigger`);
+    }
+  }
+
+  // Test 3: Straight Red Card
+  {
+    const engine = new GameEngine();
+    engine.loadScenario(ACADEMY_SCENARIOS.find((s) => s.id === 'academy_run_to_score')!);
+    const attacker = engine.players.find((p) => p.team === 'left')!;
+    const defender = engine.players.find((p) => p.team === 'right' && !p.isGoalkeeper)!;
+    
+    let found = false;
+    for (let seed = 1; seed < 2000; seed++) {
+      engine.setSeed(seed);
+      attacker.position = { x: 0.2, y: 0.0 };
+      defender.position = { x: 0.22, y: 0.0 };
+      engine.ball.position = { x: 0.2, y: 0.0, z: 0 };
+      engine.ball.ownerId = attacker.id;
+      attacker.hasBall = true;
+      defender.tackleCooldown = 0;
+      defender.yellowCards = 0;
+      defender.redCard = false;
+      engine.stats.yellowCards.right = 0;
+      engine.stats.redCards.right = 0;
+      engine.stats.fouls.right = 0;
+
+      engine.step(new Map([[defender.id, { type: ActionType.SLIDING }]]), 1 / 60);
+      if (defender.yellowCards === 0 && defender.redCard && engine.stats.yellowCards.right === 0 && engine.stats.redCards.right === 1) {
+        console.log(`✓ Straight Red Card (roll >= 0.95 -> player.redCard = true, yellowCards = 0, stats.redCards = 1): PASS`);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      console.log(`✗ Straight Red Card test failed to trigger`);
+    }
+  }
+
+  // Test 4: Already Red Card Guard (skips further cards)
+  {
+    const engine = new GameEngine();
+    engine.loadScenario(ACADEMY_SCENARIOS.find((s) => s.id === 'academy_run_to_score')!);
+    const attacker = engine.players.find((p) => p.team === 'left')!;
+    const defender = engine.players.find((p) => p.team === 'right' && !p.isGoalkeeper)!;
+    
+    let found = false;
+    for (let seed = 1; seed < 1000; seed++) {
+      engine.setSeed(seed);
+      attacker.position = { x: 0.2, y: 0.0 };
+      defender.position = { x: 0.22, y: 0.0 };
+      engine.ball.position = { x: 0.2, y: 0.0, z: 0 };
+      engine.ball.ownerId = attacker.id;
+      attacker.hasBall = true;
+      defender.tackleCooldown = 0;
+      defender.yellowCards = 1;
+      defender.redCard = true; // Already carrying red
+      engine.stats.yellowCards.right = 1;
+      engine.stats.redCards.right = 1;
+      engine.stats.fouls.right = 2;
+
+      engine.step(new Map([[defender.id, { type: ActionType.SLIDING }]]), 1 / 60);
+      if (engine.stats.fouls.right === 3 && defender.yellowCards === 1 && defender.redCard === true && engine.stats.yellowCards.right === 1 && engine.stats.redCards.right === 1) {
+        console.log(`✓ Red Card Guard (already red-carded player commits foul -> foul counted, card rolls skipped): PASS`);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      console.log(`✗ Red Card Guard test failed to trigger`);
+    }
   }
 }
 
