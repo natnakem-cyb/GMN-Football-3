@@ -34,11 +34,15 @@ export class RuleBasedAgent implements IAgent {
     if (player.hasBall || ball.ownerId === player.id) {
       // Shooting heuristic: within shooting range and reasonable angle
       const SHOT_RANGE = PITCH.penaltyBoxLength + 0.05;
+      const CLOSE_RANGE_EXEMPTION = PITCH.penaltyBoxLength * 0.4;
+      const ANGLE_MULTIPLIER = 1.1;
       const goalCenterPoint: Vector2D = { x: opponentGoalX, y: 0 };
       const trueDistToGoal = Vec2.distance(player.position, goalCenterPoint);
       const xDistToGoal = Math.abs(opponentGoalX - player.position.x);
       const lateralOffset = Math.abs(player.position.y);
-      const hasReasonableAngle = lateralOffset <= xDistToGoal * 0.75 + PITCH.goalWidth;
+      const hasReasonableAngle =
+        trueDistToGoal <= CLOSE_RANGE_EXEMPTION ||
+        lateralOffset <= xDistToGoal * ANGLE_MULTIPLIER + PITCH.goalWidth;
 
       if (trueDistToGoal < SHOT_RANGE && hasReasonableAngle) {
         const goalCenter: Vector2D = { x: opponentGoalX, y: (rnd() - 0.5) * 0.09 };

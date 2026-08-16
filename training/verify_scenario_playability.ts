@@ -1,9 +1,9 @@
 import { GameEngine } from '../src/engine/GameEngine';
 import { ACADEMY_SCENARIOS } from '../src/scenarios/ScenarioRegistry';
 import { RuleBasedAgent } from '../src/agents/RuleBasedAgent';
-import { AgentAction, AgentDecisionContext } from '../src/types/football';
+import { ActionType, AgentAction, AgentDecisionContext } from '../src/types/football';
 
-interface ScenarioPlayabilityResult {
+export interface ScenarioPlayabilityResult {
   scenarioId: string;
   scenarioName: string;
   episodesRun: number;
@@ -13,6 +13,10 @@ interface ScenarioPlayabilityResult {
   leftGoalsTotal: number;
   rightGoalsTotal: number;
   leftGoalRate: number;
+  leftShotAttempts: number;
+  leftShotAttemptsPerEpisode: number;
+  turnoverCount: number; // episodes ending via opponent-possession termination, not a goal or timeout
+  turnoverRate: number;  // turnoverCount / episodesRun
   objectiveCompletions: Record<string, { text: string; completedCount: number; rate: number }>;
 }
 
@@ -36,6 +40,8 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
     let totalTimeSec = 0;
     let leftGoalsTotal = 0;
     let rightGoalsTotal = 0;
+    let leftShotAttempts = 0;
+    let turnoverCount = 0;
 
     const objectiveTracker: Record<string, { text: string; count: number }> = {};
     scenario.objectives.forEach((obj) => {
@@ -55,6 +61,8 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
         const maxSteps = Math.ceil(scenario.timeLimitSeconds * 60) + 120;
         let epDone = false;
         let stepCount = 0;
+        let lastTerminated = false;
+        let lastTruncated = false;
 
         while (!epDone && stepCount < maxSteps) {
           stepCount++;
@@ -78,10 +86,17 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
             };
 
             const agent = player.team === 'left' ? leftAgent : rightAgent;
-            actionMap.set(player.id, agent.decide(context));
+            const action = agent.decide(context);
+            if (player.team === 'left' && action.type === ActionType.SHOT) {
+              leftShotAttempts++;
+            }
+            actionMap.set(player.id, action);
           }
 
           const stepRes = engine.step(actionMap, 1 / 60);
+          lastTerminated = !!stepRes.terminated;
+          lastTruncated = !!stepRes.truncated;
+
           if (stepRes.terminated || stepRes.truncated) {
             epDone = true;
           }
@@ -91,6 +106,16 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
         totalTimeSec += engine.matchTimeSeconds;
         leftGoalsTotal += engine.score.left;
         rightGoalsTotal += engine.score.right;
+
+        // Classify episode termination:
+        // A goal ended it?
+        const goalScored = engine.score.left > 0 || engine.score.right > 0;
+        if (!goalScored) {
+          if (lastTerminated) {
+            // Terminated without a goal (e.g. opponent possession / out of bounds in scenario)
+            turnoverCount++;
+          }
+        }
 
         if (engine.activeScenario) {
           for (const obj of engine.activeScenario.objectives) {
@@ -108,6 +133,8 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
     const avgSteps = totalSteps / episodesPerScenario;
     const avgSec = totalTimeSec / episodesPerScenario;
     const leftGoalRate = (leftGoalsTotal / episodesPerScenario) * 100;
+    const leftShotAttemptsPerEpisode = leftShotAttempts / episodesPerScenario;
+    const turnoverRate = (turnoverCount / episodesPerScenario) * 100;
 
     const objectiveSummary: Record<string, { text: string; completedCount: number; rate: number }> = {};
     for (const [id, data] of Object.entries(objectiveTracker)) {
@@ -128,6 +155,10 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
       leftGoalsTotal,
       rightGoalsTotal,
       leftGoalRate: Math.round(leftGoalRate * 10) / 10,
+      leftShotAttempts,
+      leftShotAttemptsPerEpisode: Math.round(leftShotAttemptsPerEpisode * 100) / 100,
+      turnoverCount,
+      turnoverRate: Math.round(turnoverRate * 10) / 10,
       objectiveCompletions: objectiveSummary,
     };
 
@@ -136,6 +167,8 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
     console.log(`Episodes Run: ${summary.episodesRun} | Crashes: ${summary.crashCount}`);
     console.log(`Avg Duration: ${summary.avgEpisodeLengthSec}s (${summary.avgEpisodeLengthSteps} steps)`);
     console.log(`Goals Scored: Left: ${summary.leftGoalsTotal} (${summary.leftGoalRate}%), Right: ${summary.rightGoalsTotal}`);
+    console.log(`Shot Attempts (Left): Total: ${summary.leftShotAttempts} (${summary.leftShotAttemptsPerEpisode}/ep)`);
+    console.log(`Turnovers (No-Goal Terminations): ${summary.turnoverCount}/${summary.episodesRun} (${summary.turnoverRate}%)`);
     console.log(`Objectives:`);
     for (const [id, obj] of Object.entries(summary.objectiveCompletions)) {
       console.log(`  - [${id}] "${obj.text}": ${obj.completedCount}/${summary.episodesRun} (${obj.rate.toFixed(1)}%)`);
@@ -149,14 +182,14 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
     }
   }
 
-  console.log('========================================================================');
+  console.log('========================================================================================================================');
   console.log('PLAYABILITY SUMMARY TABLE');
-  console.log('========================================================================');
+  console.log('========================================================================================================================');
   console.log(
-    '| SCENARIO ID                        | EPISODES | CRASHES | AVG SEC | L-GOALS | R-GOALS | GOAL RATE |'
+    '| SCENARIO ID                        | EPISODES | CRASHES | AVG SEC | L-GOALS | GOAL RATE | L-SHOTS | SHOTS/EP | TURNOVERS | TURNOVER% |'
   );
   console.log(
-    '|------------------------------------|----------|---------|---------|---------|---------|-----------|'
+    '|------------------------------------|----------|---------|---------|---------|-----------|---------|----------|-----------|-----------|'
   );
   for (const r of results) {
     const idPad = r.scenarioId.padEnd(34, ' ');
@@ -164,11 +197,14 @@ export function runPlayabilitySuite(episodesPerScenario = 50): ScenarioPlayabili
     const crPad = String(r.crashCount).padStart(7, ' ');
     const secPad = (r.avgEpisodeLengthSec.toFixed(2) + 's').padStart(7, ' ');
     const lgPad = String(r.leftGoalsTotal).padStart(7, ' ');
-    const rgPad = String(r.rightGoalsTotal).padStart(7, ' ');
     const ratePad = (r.leftGoalRate.toFixed(1) + '%').padStart(9, ' ');
-    console.log(`| ${idPad} | ${epPad} | ${crPad} | ${secPad} | ${lgPad} | ${rgPad} | ${ratePad} |`);
+    const shotsPad = String(r.leftShotAttempts).padStart(7, ' ');
+    const shotEpPad = String(r.leftShotAttemptsPerEpisode.toFixed(2)).padStart(8, ' ');
+    const toPad = String(r.turnoverCount).padStart(9, ' ');
+    const toRatePad = (r.turnoverRate.toFixed(1) + '%').padStart(9, ' ');
+    console.log(`| ${idPad} | ${epPad} | ${crPad} | ${secPad} | ${lgPad} | ${ratePad} | ${shotsPad} | ${shotEpPad} | ${toPad} | ${toRatePad} |`);
   }
-  console.log('========================================================================\n');
+  console.log('========================================================================================================================\n');
 
   if (!emptyGoalPassed) {
     console.error('FATAL GATE FAILURE: academy_empty_goal scored 0 goals across all episodes!');
