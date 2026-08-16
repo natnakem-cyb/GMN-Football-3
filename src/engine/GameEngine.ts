@@ -87,6 +87,7 @@ export class GameEngine {
   public replayBuffer: ReplayFrame[] = [];
   public maxReplayFrames = 3000;
   public events: MatchEvent[] = [];
+  private eventIdCounter: number = 0;
 
   private possessionTicks = { left: 0, right: 0 };
   private goalResetTimer = 0;
@@ -127,6 +128,7 @@ export class GameEngine {
     this.tickCount = 0;
     this.status = 'playing';
     this.events = [];
+    this.eventIdCounter = 0;
     this.replayBuffer = [];
     this.possessionTicks = { left: 0, right: 0 };
     this.stats = this.createDefaultStats();
@@ -247,6 +249,7 @@ export class GameEngine {
     this.tickCount = 0;
     this.status = 'playing';
     this.events = [];
+    this.eventIdCounter = 0;
     this.replayBuffer = [];
     this.possessionTicks = { left: 0, right: 0 };
     this.stats = this.createDefaultStats();
@@ -1062,8 +1065,9 @@ export class GameEngine {
     team?: TeamSide,
     playerId?: string
   ): void {
+    this.eventIdCounter++;
     const event: MatchEvent = {
-      id: `evt_${this.tickCount}_${this.events.length + 1}`,
+      id: `evt_${this.tickCount}_${this.eventIdCounter}`,
       timeSeconds: this.matchTimeSeconds,
       type,
       team,

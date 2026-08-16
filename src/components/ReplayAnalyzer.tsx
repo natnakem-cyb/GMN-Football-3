@@ -139,9 +139,9 @@ export const ReplayAnalyzer: React.FC<ReplayAnalyzerProps> = ({
               <p className="text-xs text-slate-500">No match events recorded yet.</p>
             ) : (
               <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1">
-                {events.map((evt) => (
+                {events.map((evt, idx) => (
                   <button
-                    key={evt.id}
+                    key={`${evt.id}_${idx}`}
                     onClick={() => handleBookmarkClick(evt)}
                     className={`px-2.5 py-1 rounded-lg text-xs font-medium border flex items-center gap-1.5 transition-all ${
                       evt.type === 'goal'
