@@ -14,11 +14,12 @@ import {
 } from '../src/engine/Contract';
 import { Vec2 } from '../src/engine/Vector';
 import { RuleBasedAgent } from '../src/agents/RuleBasedAgent';
+import { ObservationEncoder } from '../src/engine/ObservationEncoder';
 
 const PORT = parseInt(process.env.GMN_BRIDGE_PORT || '5050', 10);
 const HOST = '127.0.0.1';
 
-class GMNBridgeService {
+export class GMNBridgeService {
   private engine: GameEngine;
   private botAgents: Map<string, RuleBasedAgent>;
   private scenarioMap: Map<string, ScenarioConfig>;
@@ -63,6 +64,9 @@ class GMNBridgeService {
         ),
         scenario: sc?.codeName || 'free_play',
         controlledPlayerId: this.engine.controlledPlayerId,
+        controllableAgentIds: this.engine.players
+          .filter((p) => p.team === 'left')
+          .map((p) => p.id),
       },
     };
   }
@@ -119,6 +123,82 @@ class GMNBridgeService {
         checkpointReward: result.info.checkpointReward,
         ballDistanceToGoal: result.info.ballDistanceToGoal,
       },
+    };
+  }
+
+  public stepMulti(actionIndices: number[]) {
+    const controllableIds = this.engine.players
+      .filter((p) => p.team === 'left')
+      .map((p) => p.id);
+
+    if (actionIndices.length !== controllableIds.length) {
+      throw new Error(
+        `[GMN Multi-Agent] Expected ${controllableIds.length} actions, got ${actionIndices.length}`
+      );
+    }
+
+    const actionMap = new Map<string, AgentAction>();
+
+    // 1. Controlled agents (left team), in fixed order
+    controllableIds.forEach((id, i) => {
+      const player = this.engine.players.find((p) => p.id === id)!;
+      actionMap.set(id, mapDiscreteAction(actionIndices[i], player.heading));
+    });
+
+    // 2. Automated bots for other players (if any)
+    this.engine.players.forEach((player) => {
+      if (controllableIds.includes(player.id)) return;
+      if (!this.botAgents.has(player.id)) {
+        this.botAgents.set(
+          player.id,
+          new RuleBasedAgent(`bot_${player.id}`, player.name, 'medium')
+        );
+      }
+      const bot = this.botAgents.get(player.id)!;
+      actionMap.set(
+        player.id,
+        bot.decide({
+          player,
+          teammates: this.engine.players.filter((p) => p.team === player.team),
+          opponents: this.engine.players.filter((p) => p.team !== player.team),
+          ball: this.engine.ball,
+          allPlayers: this.engine.players,
+          teamSide: player.team,
+          controlledPlayerId: this.engine.controlledPlayerId,
+          matchTime: this.engine.matchTimeSeconds,
+          rng: this.engine.rng,
+        })
+      );
+    });
+
+    // 3. Execute deterministic physics tick (1/60s)
+    const result = this.engine.step(actionMap, 1 / 60);
+
+    // 4. Re-encode one observation per controlled agent from the
+    // already-updated post-step state — do not step the engine again
+    const observations = controllableIds.map((id) =>
+      ObservationEncoder.encode(
+        this.engine.players,
+        this.engine.ball,
+        id,
+        this.engine.score,
+        this.engine.tickCount,
+        this.engine.activeScenario ? this.engine.activeScenario.timeLimitSeconds * 60 : 3600,
+        this.engine.gameMode
+      ).rawVector
+    );
+
+    return {
+      reward: result.reward,
+      terminated: result.terminated,
+      truncated: result.truncated,
+      info: {
+        score: result.info.score,
+        event: result.info.event,
+        checkpointReward: result.info.checkpointReward,
+        ballDistanceToGoal: result.info.ballDistanceToGoal,
+      },
+      observations, // array, same order as controllableIds
     };
   }
 
@@ -189,6 +269,18 @@ const server = http.createServer((req, res) => {
         return;
       }
 
+      if (req.method === 'POST' && req.url === '/step_multi') {
+        if (!Array.isArray(parsedBody.actions)) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'actions must be an array of integers' }));
+          return;
+        }
+        const multiResult = bridge.stepMulti(parsedBody.actions);
+        res.writeHead(200);
+        res.end(JSON.stringify(multiResult));
+        return;
+      }
+
       if (req.method === 'POST' && req.url === '/close') {
         res.writeHead(200);
         res.end(JSON.stringify({ status: 'closing' }));
@@ -217,7 +309,7 @@ const server = http.createServer((req, res) => {
 // Offset 12 (4B float32): ballDistanceToGoal
 // Offset 16 (1B uint8): eventCode
 // Offset 17 (460B): 115 * float32 observation
-function encodeStepBinary(stepResult: ReturnType<typeof bridge.step>): Buffer {
+export function encodeStepBinary(stepResult: ReturnType<typeof bridge.step>): Buffer {
   const buf = Buffer.allocUnsafe(477);
   buf.writeFloatLE(stepResult.reward || 0.0, 0);
   buf.writeUInt8(stepResult.terminated ? 1 : 0, 4);
@@ -239,6 +331,42 @@ function encodeStepBinary(stepResult: ReturnType<typeof bridge.step>): Buffer {
   return buf;
 }
 
+// Multi-Agent Binary step-response layout: 17 + 460 * N bytes total, all little-endian
+// Offset 0 (4B float32): reward (shared team reward)
+// Offset 4 (1B uint8): terminated (0/1)
+// Offset 5 (1B uint8): truncated (0/1)
+// Offset 6 (1B uint8): scoreLeft
+// Offset 7 (1B uint8): scoreRight
+// Offset 8 (4B float32): checkpointReward
+// Offset 12 (4B float32): ballDistanceToGoal
+// Offset 16 (1B uint8): eventCode
+// Offset 17 (460 * N B): N observations, 115 * float32 each, in controllableAgentIds order
+export function encodeMultiStepBinary(multiResult: ReturnType<typeof bridge.stepMulti>): Buffer {
+  const N = multiResult.observations.length;
+  const buf = Buffer.allocUnsafe(17 + 460 * N);
+  buf.writeFloatLE(multiResult.reward || 0.0, 0);
+  buf.writeUInt8(multiResult.terminated ? 1 : 0, 4);
+  buf.writeUInt8(multiResult.truncated ? 1 : 0, 5);
+  buf.writeUInt8(Math.max(0, Math.min(255, multiResult.info.score?.left ?? 0)), 6);
+  buf.writeUInt8(Math.max(0, Math.min(255, multiResult.info.score?.right ?? 0)), 7);
+  buf.writeFloatLE(multiResult.info.checkpointReward ?? 0.0, 8);
+  buf.writeFloatLE(multiResult.info.ballDistanceToGoal ?? 0.0, 12);
+
+  const eventType = multiResult.info.event?.type;
+  const eventCode = getEventCode(eventType);
+  buf.writeUInt8(eventCode, 16);
+
+  for (let agentIdx = 0; agentIdx < N; agentIdx++) {
+    const obs = multiResult.observations[agentIdx];
+    const baseOffset = 17 + agentIdx * 460;
+    for (let i = 0; i < OBSERVATION_DIM; i++) {
+      buf.writeFloatLE(obs[i] ?? 0.0, baseOffset + i * 4);
+    }
+  }
+
+  return buf;
+}
+
 // Attach WebSocket Server to the same HTTP Server instance
 const wss = new WebSocketServer({ server });
 
@@ -247,13 +375,18 @@ wss.on('connection', (ws: WebSocket) => {
     try {
       if (isBinary) {
         const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as any);
-        if (buf.length < 1) return;
-        const actionIdx = buf.readUInt8(0);
-        if (actionIdx >= ACTION_SPACE_SIZE) return;
-
-        const stepResult = bridge.step(actionIdx);
-        const respBuf = encodeStepBinary(stepResult);
-        ws.send(respBuf, { binary: true });
+        if (buf.length === 1) {
+          // existing single-agent path — unchanged
+          const actionIdx = buf.readUInt8(0);
+          if (actionIdx >= ACTION_SPACE_SIZE) return;
+          const stepResult = bridge.step(actionIdx);
+          ws.send(encodeStepBinary(stepResult), { binary: true });
+        } else if (buf.length > 1) {
+          // new multi-agent path
+          const actionIndices = Array.from(buf); // one uint8 per controlled agent, in controllableAgentIds order
+          const multiResult = bridge.stepMulti(actionIndices);
+          ws.send(encodeMultiStepBinary(multiResult), { binary: true });
+        }
       } else {
         const text = data.toString('utf8');
         const parsed = JSON.parse(text);
@@ -267,6 +400,9 @@ wss.on('connection', (ws: WebSocket) => {
         } else if (parsed.type === 'step') {
           const stepResult = bridge.step(parsed.action);
           ws.send(JSON.stringify(stepResult));
+        } else if (parsed.type === 'step_multi') {
+          const multiResult = bridge.stepMulti(parsed.actions);
+          ws.send(JSON.stringify(multiResult));
         }
       }
     } catch (err: any) {
