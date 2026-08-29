@@ -24,7 +24,8 @@
     "test:scripted": "tsx training/scripted_eval.ts",
     "test:playability": "tsx training/verify_scenario_playability.ts",
     "test:validation": "python3 training/rl_validation_suite.py",
-    "test:multiagent": "python3 training/test_multiagent_determinism.py"
+    "test:multiagent": "python3 training/test_multiagent_determinism.py",
+    "test:pettingzoo": "python3 training/test_pettingzoo_wrapper.py"
   },
   "dependencies": {
     "@google/genai": "latest",

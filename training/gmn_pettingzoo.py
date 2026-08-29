@@ -1,0 +1,303 @@
+"""
+GMN-Football-3 — PettingZoo Multi-Agent Parallel Environment Wrapper
+Authoritative Environment Binding for Multi-Agent Football Simulation.
+
+Wraps the GMN-Football-3 WebSocket bridge server as a PettingZoo ParallelEnv.
+Supports simultaneous control of N left-team players with independent per-agent
+observations (Box(115,)) and discrete action spaces (Discrete(19)).
+
+NOTE: Connection/lifecycle helper methods are duplicated here from gmn_gym.py
+as a deliberate isolation boundary to avoid touching verified single-agent code.
+(Known follow-up cleanup opportunity: extract shared transport/lifecycle helpers).
+"""
+
+import os
+import sys
+import time
+import json
+import struct
+import subprocess
+from typing import Dict, List, Optional, Tuple, Any
+
+import numpy as np
+import requests
+import websockets.sync.client
+from gymnasium import spaces
+from pettingzoo.utils.env import ParallelEnv
+
+# Centralized version & contract constants
+GMN_ENV_VERSION = "3.0.0"
+OBSERVATION_SCHEMA_VERSION = "simple115_v2"
+ACTION_SCHEMA_VERSION = "discrete19_v1"
+
+OBSERVATION_DIM = 115
+ACTION_SPACE_SIZE = 19
+
+
+class GMNMultiAgentEnv(ParallelEnv):
+    """
+    PettingZoo ParallelEnv wrapper for GMN-Football-3 multi-agent scenarios.
+    Controls N players on the left team simultaneously.
+    """
+
+    metadata = {
+        "render_modes": ["human", "rgb_array"],
+        "name": "gmn_football_multiagent_v3",
+    }
+
+    def __init__(
+        self,
+        scenario: str = "academy_3_vs_1_with_keeper",
+        host: str = "127.0.0.1",
+        port: Optional[int] = None,
+        auto_start_bridge: bool = True,
+        render_mode: Optional[str] = None,
+    ):
+        super().__init__()
+        self.scenario = scenario
+        self.host = host
+        self.port = port or int(os.environ.get("GMN_BRIDGE_PORT", "5050"))
+        self.base_url = f"http://{self.host}:{self.port}"
+        self.ws_url = f"ws://{self.host}:{self.port}"
+        self.auto_start_bridge = auto_start_bridge
+        self.render_mode = render_mode
+        self.bridge_process: Optional[subprocess.Popen] = None
+        self.ws_client = None
+
+        self._step_count = 0
+        self.agents: List[str] = []
+        self.possible_agents: List[str] = []
+
+        # Observation and action spaces (identical across all agents)
+        self._obs_space = spaces.Box(
+            low=-5.0,
+            high=5.0,
+            shape=(OBSERVATION_DIM,),
+            dtype=np.float32,
+        )
+        self._act_space = spaces.Discrete(ACTION_SPACE_SIZE)
+
+        # Ensure Bridge Server is running & connected
+        self._ensure_bridge_running()
+        self._connect_ws()
+
+        # Perform initial reset to discover controllable agents
+        self.reset()
+
+    def _ensure_bridge_running(self):
+        """Verifies connection to bridge server or starts it via npx tsx."""
+        for attempt in range(6):
+            try:
+                res = requests.get(f"{self.base_url}/health", timeout=1.0)
+                if res.status_code == 200:
+                    info = res.json()
+                    bridge_obs_dim = info.get("observation_dim", 115)
+                    bridge_act_dim = info.get("action_space_size", info.get("action_dim", 19))
+                    if bridge_obs_dim != OBSERVATION_DIM or bridge_act_dim != ACTION_SPACE_SIZE:
+                        raise RuntimeError(
+                            f"[GMN-PettingZoo Contract Mismatch] Bridge reports obs_dim={bridge_obs_dim}, "
+                            f"act_dim={bridge_act_dim}; Expected obs_dim={OBSERVATION_DIM}, act_dim={ACTION_SPACE_SIZE}."
+                        )
+                    return
+            except requests.RequestException:
+                pass
+
+            if self.auto_start_bridge and self.bridge_process is None:
+                print(f"[GMN-PettingZoo] Launching Headless Bridge Server on {self.base_url}...")
+                bridge_script = os.path.join(os.path.dirname(__file__), "bridge_server.ts")
+                self.bridge_process = subprocess.Popen(
+                    ["npx", "tsx", bridge_script],
+                    env=dict(os.environ, GMN_BRIDGE_PORT=str(self.port)),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                time.sleep(2.0)
+            else:
+                time.sleep(1.0)
+
+    def _connect_ws(self):
+        """Establishes or reconnects WebSocket client connection."""
+        if self.ws_client is not None:
+            try:
+                self.ws_client.close()
+            except Exception:
+                pass
+        self.ws_client = websockets.sync.client.connect(self.ws_url, max_size=None)
+
+    def observation_space(self, agent: str) -> spaces.Space:
+        """Returns the observation space for the given agent."""
+        return self._obs_space
+
+    def action_space(self, agent: str) -> spaces.Space:
+        """Returns the action space for the given agent."""
+        return self._act_space
+
+    def reset(
+        self,
+        seed: Optional[int] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
+        """
+        Resets the multi-agent environment and returns per-agent initial observations.
+        """
+        self._step_count = 0
+
+        target_scenario = self.scenario
+        if options and "scenario" in options:
+            target_scenario = options["scenario"]
+
+        payload: Dict[str, Any] = {
+            "type": "reset",
+            "scenario": target_scenario,
+        }
+        if seed is not None:
+            payload["seed"] = int(seed)
+
+        if self.ws_client is None:
+            self._connect_ws()
+
+        try:
+            self.ws_client.send(json.dumps(payload))
+            resp_text = self.ws_client.recv()
+            data = json.loads(resp_text)
+        except Exception:
+            self._connect_ws()
+            self.ws_client.send(json.dumps(payload))
+            resp_text = self.ws_client.recv()
+            data = json.loads(resp_text)
+
+        info_data = data.get("info", {})
+        controllable_ids = info_data.get("controllableAgentIds", [])
+        if not controllable_ids:
+            # Fallback if single agent
+            controlled_id = info_data.get("controlledPlayerId", "left_1")
+            controllable_ids = [controlled_id]
+
+        self.possible_agents = list(controllable_ids)
+        self.agents = list(self.possible_agents)
+
+        # Observations list from reset response
+        raw_obs_list = data.get("observations", [])
+        if not raw_obs_list and "observation" in data:
+            raw_obs_list = [data["observation"]]
+
+        observations: Dict[str, np.ndarray] = {}
+        for idx, agent in enumerate(self.agents):
+            if idx < len(raw_obs_list):
+                obs = np.array(raw_obs_list[idx], dtype=np.float32)
+            else:
+                obs = np.zeros(OBSERVATION_DIM, dtype=np.float32)
+            observations[agent] = obs
+
+        infos: Dict[str, Any] = {agent: dict(info_data) for agent in self.agents}
+        return observations, infos
+
+    def step(
+        self,
+        actions: Dict[str, int],
+    ) -> Tuple[
+        Dict[str, np.ndarray],
+        Dict[str, float],
+        Dict[str, bool],
+        Dict[str, bool],
+        Dict[str, Any],
+    ]:
+        """
+        Executes a multi-agent joint action step.
+        actions: mapping from agent ID to discrete action (0..18).
+        """
+        if not self.agents:
+            return {}, {}, {}, {}, {}
+
+        self._step_count += 1
+        num_agents = len(self.agents)
+
+        # Pack actions strictly in self.agents (controllableAgentIds) order
+        action_bytes = bytearray(num_agents)
+        for i, agent in enumerate(self.agents):
+            act = int(actions.get(agent, 0))
+            if not (0 <= act < ACTION_SPACE_SIZE):
+                raise ValueError(
+                    f"[GMN-PettingZoo] Invalid action {act} for agent {agent}. Must be in [0, {ACTION_SPACE_SIZE - 1}]."
+                )
+            action_bytes[i] = act
+
+        if self.ws_client is None:
+            self._connect_ws()
+
+        try:
+            self.ws_client.send(bytes(action_bytes))
+            data = self.ws_client.recv()
+        except Exception:
+            self._connect_ws()
+            self.ws_client.send(bytes(action_bytes))
+            data = self.ws_client.recv()
+
+        if not isinstance(data, (bytes, bytearray)):
+            raise RuntimeError(f"[GMN-PettingZoo] Expected binary WebSocket frame, got {type(data)}")
+
+        expected_len = 17 + 460 * num_agents
+        if len(data) != expected_len:
+            raise RuntimeError(
+                f"[GMN-PettingZoo Frame Length Error] Expected {expected_len} bytes "
+                f"(17B header + 460B * {num_agents} agents), but received {len(data)} bytes."
+            )
+
+        # Unpack 17-byte header
+        reward, term, trunc, score_l, score_r, cp_reward, dist_goal, event_code = struct.unpack_from(
+            "<f??BBffB", data, 0
+        )
+
+        shared_reward = float(reward)
+        shared_term = bool(term)
+        shared_trunc = bool(trunc)
+        shared_info = {
+            "score": {"left": int(score_l), "right": int(score_r)},
+            "checkpointReward": float(cp_reward),
+            "ballDistanceToGoal": float(dist_goal),
+            "eventCode": int(event_code),
+            "step": self._step_count,
+        }
+
+        observations: Dict[str, np.ndarray] = {}
+        rewards: Dict[str, float] = {}
+        terminations: Dict[str, bool] = {}
+        truncations: Dict[str, bool] = {}
+        infos: Dict[str, Any] = {}
+
+        for i, agent in enumerate(self.agents):
+            offset = 17 + i * 460
+            obs = np.frombuffer(data, dtype="<f4", count=OBSERVATION_DIM, offset=offset).copy()
+            observations[agent] = obs
+            rewards[agent] = shared_reward
+            terminations[agent] = shared_term
+            truncations[agent] = shared_trunc
+            infos[agent] = dict(shared_info)
+
+        if shared_term or shared_trunc:
+            self.agents = []
+
+        return observations, rewards, terminations, truncations, infos
+
+    def render(self):
+        """Render mode placeholder."""
+        if self.render_mode == "human":
+            print(f"[GMNMultiAgentEnv] Step: {self._step_count} | Agents: {self.possible_agents}")
+
+    def close(self):
+        """Cleans up WebSocket connection and bridge subprocess."""
+        if self.ws_client is not None:
+            try:
+                self.ws_client.send(json.dumps({"type": "close"}))
+                self.ws_client.close()
+            except Exception:
+                pass
+            self.ws_client = None
+
+        if self.bridge_process is not None:
+            try:
+                self.bridge_process.terminate()
+                self.bridge_process.wait(timeout=2.0)
+            except Exception:
+                pass
+            self.bridge_process = None

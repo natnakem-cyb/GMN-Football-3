@@ -54,8 +54,26 @@ export class GMNBridgeService {
 
     // Pure initial observation without stepping physics
     const initialObs = this.engine.getObservation();
+
+    const controllableAgentIds = this.engine.players
+      .filter((p) => p.team === 'left')
+      .map((p) => p.id);
+
+    const perAgentObservations = controllableAgentIds.map((id) =>
+      ObservationEncoder.encode(
+        this.engine.players,
+        this.engine.ball,
+        id,
+        this.engine.score,
+        this.engine.tickCount,
+        this.engine.activeScenario ? this.engine.activeScenario.timeLimitSeconds * 60 : 3600,
+        this.engine.gameMode
+      ).rawVector
+    );
+
     return {
       observation: initialObs.rawVector,
+      observations: perAgentObservations,
       info: {
         score: { ...this.engine.score },
         ballDistanceToGoal: Vec2.distance(
@@ -64,9 +82,7 @@ export class GMNBridgeService {
         ),
         scenario: sc?.codeName || 'free_play',
         controlledPlayerId: this.engine.controlledPlayerId,
-        controllableAgentIds: this.engine.players
-          .filter((p) => p.team === 'left')
-          .map((p) => p.id),
+        controllableAgentIds,
       },
     };
   }
