@@ -404,6 +404,7 @@ export class GameEngine {
     actionMap: Map<string, AgentAction>,
     dt = 1 / 60
   ): RLStepResult {
+    const eventsBefore = this.events.length;
     const prevBallX = this.ball.position.x;
     let goalScoredThisTick: TeamSide | null = null;
     let eventDescription: string | undefined;
@@ -467,11 +468,16 @@ export class GameEngine {
       this.gameMode
     );
 
+    const shotTakenByLeft = this.events
+      .slice(eventsBefore)
+      .some((e) => e.type === 'shot' && e.team === 'left');
+
     const { reward, checkpoint } = ObservationEncoder.computeReward(
       prevBallX,
       this.ball.position.x,
       goalScoredThisTick,
-      'left'
+      'left',
+      shotTakenByLeft
     );
 
     const isGoalScored = this.score.left > 0 || this.score.right > 0 || this.status === 'goal';

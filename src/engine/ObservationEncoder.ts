@@ -155,14 +155,15 @@ export class ObservationEncoder {
    * Reward shaping computation:
    * +1.0 for scoring a goal
    * -1.0 for conceding a goal
-   * +0.1 for moving ball closer to opponent goal (checkpoint reward)
-   * +0.05 for maintaining possession in opponent half
+   * Checkpoint reward for moving ball closer to opponent goal (up to +0.05)
+   * +0.03 shot-attempt shaping bonus
    */
   static computeReward(
     prevBallX: number,
     currBallX: number,
     goalScoredTeam: TeamSide | null,
-    targetTeam: TeamSide = 'left'
+    targetTeam: TeamSide = 'left',
+    shotTakenByTargetTeam = false
   ): { reward: number; checkpoint: number } {
     let reward = 0;
     let checkpoint = 0;
@@ -180,6 +181,13 @@ export class ObservationEncoder {
         checkpoint = Math.min(0.05, deltaX * 0.5);
         reward += checkpoint;
       }
+    }
+
+    // Shot-attempt shaping bonus — encourages discovering the act of
+    // shooting, distinct from and much smaller than the goal reward itself.
+    const SHOT_ATTEMPT_BONUS = 0.03;
+    if (shotTakenByTargetTeam) {
+      reward += SHOT_ATTEMPT_BONUS;
     }
 
     return { reward, checkpoint };
