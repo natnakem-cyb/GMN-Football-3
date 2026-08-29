@@ -19,7 +19,7 @@ def evaluate_checkpoint(model_filename: str = "ppo_academy_empty_goal_smoke.zip"
         print(f"Error: Checkpoint {model_path} not found.")
         return False
 
-    env = GMNFootballEnv(scenario="academy_empty_goal", port=5050)
+    env = GMNFootballEnv(scenario="academy_empty_goal", port=5050, use_ws=True)
     model = PPO.load(model_path)
 
     rewards = []

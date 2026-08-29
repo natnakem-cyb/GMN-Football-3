@@ -10,7 +10,7 @@ from gmn_gym import GMNFootballEnv, OBSERVATION_DIM, ACTION_SPACE_SIZE
 
 
 def run_episode(seed: int, action_seq: list) -> tuple:
-    env = GMNFootballEnv(scenario="academy_empty_goal", auto_start_bridge=True)
+    env = GMNFootballEnv(scenario="academy_empty_goal", auto_start_bridge=True, use_ws=True)
     obs, info = env.reset(seed=seed)
     
     observations = [obs]

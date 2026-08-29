@@ -181,7 +181,7 @@ def evaluate_checkpoint_deep(model, env, label: str, num_episodes: int = 100):
 
 def run_full_validation():
     models_dir = os.path.join(os.path.dirname(__file__), "models")
-    env = GMNFootballEnv(scenario="academy_run_to_score", port=5050)
+    env = GMNFootballEnv(scenario="academy_run_to_score", port=5050, use_ws=True)
 
     checkpoints = [
         ("Stage 1 Zero-Shot", os.path.join(models_dir, "ppo_academy_empty_goal_100k.zip")),

@@ -13,7 +13,7 @@ def benchmark_python_bridge(total_steps: int = 1000):
     print(f"Steps: {total_steps} | Path: Python -> HTTP Session -> Node Bridge -> GameEngine -> Python")
     print("==================================================")
 
-    env = GMNFootballEnv(scenario="academy_empty_goal", port=5050)
+    env = GMNFootballEnv(scenario="academy_empty_goal", port=5050, use_ws=False)
     obs, info = env.reset(seed=42)
 
     start_time = time.perf_counter()

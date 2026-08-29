@@ -15,7 +15,7 @@ def test_gymnasium_environment():
     print("==================================================")
 
     print("\n1. Initializing GMNFootballEnv('academy_empty_goal')...")
-    env = GMNFootballEnv(scenario="academy_empty_goal", port=5050)
+    env = GMNFootballEnv(scenario="academy_empty_goal", port=5050, use_ws=True)
 
     try:
         print("\n2. Testing reset()...")

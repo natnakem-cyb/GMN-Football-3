@@ -47,7 +47,7 @@ def run_random_baseline(total_steps: int = 10000):
     print(f"Executing {total_steps} random steps on academy_empty_goal")
     print("==================================================")
 
-    env = GMNFootballEnv(scenario="academy_empty_goal", port=5050)
+    env = GMNFootballEnv(scenario="academy_empty_goal", port=5050, use_ws=True)
     obs, info = env.reset(seed=42)
 
     episode_rewards = []
@@ -150,7 +150,7 @@ def run_ppo_experiments():
 
     # 1. Train PPO for 10,000 steps
     print("\n>>> Phase 1: Training PPO for 10,000 steps...")
-    env10k = GMNFootballEnv(scenario="academy_empty_goal", port=5050)
+    env10k = GMNFootballEnv(scenario="academy_empty_goal", port=5050, use_ws=True)
     cb10k = RLMetricsCallback()
 
     model10k = PPO(

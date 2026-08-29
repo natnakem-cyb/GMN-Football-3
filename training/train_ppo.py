@@ -21,7 +21,7 @@ def run_ppo_smoke_test(timesteps: int = 1000):
     os.makedirs(logs_dir, exist_ok=True)
 
     print("\n1. Initializing Environment...")
-    env = GMNFootballEnv(scenario="academy_empty_goal", port=5050)
+    env = GMNFootballEnv(scenario="academy_empty_goal", port=5050, use_ws=True)
 
     try:
         print("\n2. Configuring PPO Model (MlpPolicy, gamma=0.99, n_steps=256, batch_size=64)...")

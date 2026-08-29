@@ -103,7 +103,7 @@ def run_stage2_curriculum():
     print("GMN STAGE 2: ACADEMY RUN TO SCORE CURRICULUM TRAINING")
     print("==================================================")
 
-    env = GMNFootballEnv(scenario="academy_run_to_score", port=5050)
+    env = GMNFootballEnv(scenario="academy_run_to_score", port=5050, use_ws=True)
 
     # 1. Zero-shot Evaluation of Stage 1 Model on Stage 2
     stage1_checkpoint = os.path.join(models_dir, "ppo_academy_empty_goal_100k.zip")
