@@ -26,7 +26,9 @@
     "test:validation": "python3 training/rl_validation_suite.py",
     "test:multiagent": "python3 training/test_multiagent_determinism.py",
     "test:pettingzoo": "python3 training/test_pettingzoo_wrapper.py",
-    "test:ippo": "python3 training/train_ippo.py 3072"
+    "test:ippo": "python3 training/train_ippo.py 3072",
+    "test:ippo:train": "python3 training/train_ippo.py 200000",
+    "test:ippo:eval": "python3 training/eval_ippo_baseline.py --compare-both"
   },
   "dependencies": {
     "@google/genai": "latest",

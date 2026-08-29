@@ -88,7 +88,7 @@ class GMNFootballEnv(gym.Env):
 
     def _ensure_bridge_running(self):
         """Verifies connection to bridge server or starts it via npx tsx."""
-        for attempt in range(6):
+        for attempt in range(25):
             try:
                 res = requests.get(f"{self.base_url}/health", timeout=1.0)
                 if res.status_code == 200:
@@ -113,9 +113,9 @@ class GMNFootballEnv(gym.Env):
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-                time.sleep(2.0)
-            else:
                 time.sleep(1.0)
+            else:
+                time.sleep(0.4)
 
     def _connect_ws(self):
         if self.ws_client is not None:
@@ -123,6 +123,12 @@ class GMNFootballEnv(gym.Env):
                 self.ws_client.close()
             except Exception:
                 pass
+        for attempt in range(15):
+            try:
+                self.ws_client = websockets.sync.client.connect(self.ws_url, max_size=None)
+                return
+            except Exception:
+                time.sleep(0.2)
         self.ws_client = websockets.sync.client.connect(self.ws_url, max_size=None)
 
     def reset(

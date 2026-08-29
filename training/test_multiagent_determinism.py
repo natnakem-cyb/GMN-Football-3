@@ -21,6 +21,7 @@ EXPECTED_RESPONSE_BYTES = 17 + 460 * NUM_AGENTS  # 17 + 1380 = 1397 bytes
 
 
 def start_bridge_server(port: int) -> subprocess.Popen:
+    import urllib.request
     bridge_script = os.path.join(os.path.dirname(__file__), "bridge_server.ts")
     proc = subprocess.Popen(
         ["npx", "tsx", bridge_script],
@@ -28,7 +29,14 @@ def start_bridge_server(port: int) -> subprocess.Popen:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    time.sleep(2.0)
+    for _ in range(30):
+        time.sleep(0.3)
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1.0) as resp:
+                if resp.status == 200:
+                    return proc
+        except Exception:
+            pass
     return proc
 
 
