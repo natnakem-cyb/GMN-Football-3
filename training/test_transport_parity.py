@@ -1,11 +1,37 @@
 import sys
 import os
-import time
 import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from training.gmn_gym import GMNFootballEnv, ACTION_SPACE_SIZE, OBSERVATION_DIM
+
+
+def run_trajectory(use_ws: bool, port: int, steps: int = 500, seed: int = 424242, scenario: str = "academy_empty_goal"):
+    env = GMNFootballEnv(scenario=scenario, port=port, use_ws=use_ws)
+    obs, info = env.reset(seed=seed)
+    trajectory = [obs.copy()]
+    rewards = []
+    terminations = []
+    truncations = []
+    scores = [info.get("score", {"left": 0, "right": 0})]
+
+    for step_idx in range(steps):
+        action = step_idx % ACTION_SPACE_SIZE
+        obs, rew, term, trunc, info = env.step(action)
+        trajectory.append(obs.copy())
+        rewards.append(rew)
+        terminations.append(term)
+        truncations.append(trunc)
+        scores.append(info.get("score", {"left": 0, "right": 0}))
+
+        if term or trunc:
+            obs, info = env.reset(seed=seed + step_idx + 1)
+            trajectory.append(obs.copy())
+            scores.append(info.get("score", {"left": 0, "right": 0}))
+
+    env.close()
+    return trajectory, rewards, terminations, truncations, scores
 
 
 def test_transport_parity(steps: int = 500, seed: int = 424242, scenario: str = "academy_empty_goal"):
@@ -14,81 +40,44 @@ def test_transport_parity(steps: int = 500, seed: int = 424242, scenario: str = 
     print(f"Scenario: {scenario} | Seed: {seed} | Steps: {steps}")
     print("========================================================================")
 
-    # 1. Initialize HTTP-based environment
-    print("[Test] Initializing HTTP transport environment (use_ws=False)...")
-    env_http = GMNFootballEnv(scenario=scenario, port=5050, use_ws=False)
-    obs_http, info_http = env_http.reset(seed=seed)
+    # 1. Run HTTP trajectory on isolated port
+    print("[1/2] Recording HTTP transport trajectory on port 5062...")
+    traj_http, rew_http, term_http, trunc_http, score_http = run_trajectory(
+        use_ws=False, port=5062, steps=steps, seed=seed, scenario=scenario
+    )
 
-    # 2. Initialize WebSocket-based environment
-    print("[Test] Initializing Binary WebSocket transport environment (use_ws=True)...")
-    env_ws = GMNFootballEnv(scenario=scenario, port=5050, use_ws=True)
-    obs_ws, info_ws = env_ws.reset(seed=seed)
+    # 2. Run WebSocket trajectory on isolated port
+    print("[2/2] Recording Binary WebSocket transport trajectory on port 5063...")
+    traj_ws, rew_ws, term_ws, trunc_ws, score_ws = run_trajectory(
+        use_ws=True, port=5063, steps=steps, seed=seed, scenario=scenario
+    )
 
-    # Initial reset observation comparison
-    max_init_obs_diff = np.max(np.abs(obs_http - obs_ws))
-    print(f"[Reset Check] Initial observation max absolute difference: {max_init_obs_diff:.8e}")
-    assert max_init_obs_diff < 1e-6, f"Reset observation mismatch! Diff: {max_init_obs_diff}"
-    assert info_http.get("score") == info_ws.get("score"), "Reset score mismatch!"
+    # 3. Compare trajectories
+    assert len(traj_http) == len(traj_ws), f"Trajectory length mismatch: HTTP={len(traj_http)}, WS={len(traj_ws)}"
+    assert len(rew_http) == len(rew_ws), f"Reward list length mismatch: HTTP={len(rew_http)}, WS={len(rew_ws)}"
 
-    mismatches = 0
-    max_obs_diff_overall = 0.0
-
-    print(f"[Stepping] Running {steps} synchronized actions across both transports...")
-    for step_idx in range(steps):
-        action = step_idx % ACTION_SPACE_SIZE
-
-        obs_h, rew_h, term_h, trunc_h, info_h = env_http.step(action)
-        obs_w, rew_w, term_w, trunc_w, info_w = env_ws.step(action)
-
-        obs_diff = float(np.max(np.abs(obs_h - obs_w)))
-        max_obs_diff_overall = max(max_obs_diff_overall, obs_diff)
-
-        # Assert parity
-        if obs_diff >= 1e-6 or abs(rew_h - rew_w) >= 1e-6 or term_h != term_w or trunc_h != trunc_w:
-            mismatches += 1
-            print(
-                f"[ERROR Step {step_idx}] Action={action} Mismatch:\n"
-                f"  Obs Max Diff: {obs_diff:.8e}\n"
-                f"  Reward: HTTP={rew_h} vs WS={rew_w}\n"
-                f"  Terminated: HTTP={term_h} vs WS={term_w}\n"
-                f"  Truncated: HTTP={trunc_h} vs WS={trunc_w}\n"
-                f"  Info HTTP={info_h}\n"
-                f"  Info WS={info_w}"
-            )
-            if mismatches > 5:
-                break
-
-        # Check scores
-        score_h = info_h.get("score", {})
-        score_w = info_w.get("score", {})
-        if score_h.get("left") != score_w.get("left") or score_h.get("right") != score_w.get("right"):
-            mismatches += 1
-            print(f"[ERROR Step {step_idx}] Score mismatch: HTTP={score_h} vs WS={score_w}")
-            break
-
-        # If terminal/truncated on either, reset both with next seed
-        if term_h or trunc_h or term_w or trunc_w:
-            next_seed = seed + step_idx + 1
-            obs_h, info_h = env_http.reset(seed=next_seed)
-            obs_w, info_w = env_ws.reset(seed=next_seed)
-            reset_diff = float(np.max(np.abs(obs_h - obs_w)))
-            assert reset_diff < 1e-6, f"Episode reset mismatch at step {step_idx}: {reset_diff}"
-
-    env_http.close()
-    env_ws.close()
+    max_obs_diff = max(float(np.max(np.abs(a - b))) for a, b in zip(traj_http, traj_ws))
+    max_rew_diff = max(abs(a - b) for a, b in zip(rew_http, rew_ws))
+    term_matches = all(a == b for a, b in zip(term_http, term_ws))
+    trunc_matches = all(a == b for a, b in zip(trunc_http, trunc_ws))
+    score_matches = all(a == b for a, b in zip(score_http, score_ws))
 
     print("------------------------------------------------------------------------")
-    print(f"Results over {steps} steps:")
-    print(f"- Total Mismatches: {mismatches}")
-    print(f"- Max Observation Float32 Difference: {max_obs_diff_overall:.8e}")
-    print(f"- Exact Trajectory Bit-Parity: {'PASS' if mismatches == 0 else 'FAIL'}")
+    print(f"Results over {steps} steps ({len(traj_http)} states):")
+    print(f"- Max Observation Float32 Difference: {max_obs_diff:.8e}")
+    print(f"- Max Reward Difference: {max_rew_diff:.8e}")
+    print(f"- Terminations Match: {term_matches}")
+    print(f"- Truncations Match: {trunc_matches}")
+    print(f"- Scores Match: {score_matches}")
     print("------------------------------------------------------------------------")
 
-    if mismatches > 0:
-        print("✗ TRANSPORT PARITY FAILED")
-        sys.exit(1)
-    else:
-        print("✓ TRANSPORT PARITY VERIFIED CLEANLY — HTTP AND BINARY WS ARE BIT-IDENTICAL")
+    assert max_obs_diff < 1e-6, f"Observation diff {max_obs_diff} exceeds tolerance"
+    assert max_rew_diff < 1e-6, f"Reward diff {max_rew_diff} exceeds tolerance"
+    assert term_matches, "Termination flags mismatch"
+    assert trunc_matches, "Truncation flags mismatch"
+    assert score_matches, "Scores mismatch"
+
+    print("✓ TRANSPORT PARITY VERIFIED CLEANLY — HTTP AND BINARY WS ARE BIT-IDENTICAL")
 
 
 if __name__ == "__main__":
