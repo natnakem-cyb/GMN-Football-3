@@ -301,3 +301,16 @@ class GMNMultiAgentEnv(ParallelEnv):
             except Exception:
                 pass
             self.bridge_process = None
+
+    def __getstate__(self):
+        """Allows pickling by excluding unpicklable socket/process references."""
+        state = self.__dict__.copy()
+        state["ws_client"] = None
+        state["bridge_process"] = None
+        return state
+
+    def __setstate__(self, state):
+        """Restores state from pickle and marks client/process for lazy re-initialization."""
+        self.__dict__.update(state)
+        self.bridge_process = None
+        self.ws_client = None

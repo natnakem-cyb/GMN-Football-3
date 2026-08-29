@@ -25,7 +25,8 @@
     "test:playability": "tsx training/verify_scenario_playability.ts",
     "test:validation": "python3 training/rl_validation_suite.py",
     "test:multiagent": "python3 training/test_multiagent_determinism.py",
-    "test:pettingzoo": "python3 training/test_pettingzoo_wrapper.py"
+    "test:pettingzoo": "python3 training/test_pettingzoo_wrapper.py",
+    "test:ippo": "python3 training/train_ippo.py 3072"
   },
   "dependencies": {
     "@google/genai": "latest",
