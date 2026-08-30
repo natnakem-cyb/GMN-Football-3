@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
 import { MatchStats, TeamConfig } from '../types/football';
 
 export interface TacticalAnalysisResult {
@@ -11,17 +10,21 @@ export interface TacticalAnalysisResult {
 }
 
 export class GeminiCoachService {
-  private static aiClient: GoogleGenAI | null = null;
+  private static aiClient: any = null;
 
-  private static getClient(): GoogleGenAI | null {
+  private static async getClient(): Promise<any> {
     if (!this.aiClient) {
-      // In web apps, check for optional key if available
-      const apiKey = typeof process !== 'undefined' && process.env?.GEMINI_API_KEY
-        ? process.env.GEMINI_API_KEY
-        : (import.meta as any).env?.VITE_GEMINI_API_KEY;
+      try {
+        const apiKey =
+          (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) ||
+          (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_GEMINI_API_KEY);
 
-      if (apiKey) {
-        this.aiClient = new GoogleGenAI({ apiKey });
+        if (apiKey) {
+          const { GoogleGenAI } = await import('@google/genai');
+          this.aiClient = new GoogleGenAI({ apiKey });
+        }
+      } catch (err) {
+        console.warn('Gemini client lazy initialization skipped:', err);
       }
     }
     return this.aiClient;
@@ -34,7 +37,7 @@ export class GeminiCoachService {
     score: { left: number; right: number },
     eventsSummary: string
   ): Promise<TacticalAnalysisResult> {
-    const client = this.getClient();
+    const client = await this.getClient();
 
     const prompt = `You are a world-class AI Football Tactical Analyst and Coach for Google Research Football.
 Analyze the following live match telemetry and provide structured tactical insights:
