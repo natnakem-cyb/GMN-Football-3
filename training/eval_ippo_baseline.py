@@ -130,7 +130,14 @@ def evaluate_ippo_baseline(
 
             score_left = last_info.get("score", {}).get("left", 0)
             score_right = last_info.get("score", {}).get("right", 0)
-            goal_scored = score_left > 0 or last_info.get("eventCode") == 2
+            goal_scored = score_left > 0
+
+            if ep < 10:
+                print(
+                    f"   [Ep {ep + 1:2d}] Seed: {seed} | Score: (Left {score_left} - Right {score_right}) | "
+                    f"Outcome: {'GOAL' if goal_scored else ('SAVED/MISSED' if ep_left_shots > 0 else 'NO SHOT')} | "
+                    f"Steps: {step_count:3d} ({step_count/60:.2f}s) | Shots: {ep_left_shots} | Reward: {ep_reward:+.4f}"
+                )
 
             if goal_scored:
                 left_goals_total += 1

@@ -47,7 +47,7 @@ class IPPORewardLoggingCallback(BaseCallback):
                 ep_rew = self.current_rewards[i]
                 ep_len = self.current_lengths[i]
                 info = infos[i] if i < len(infos) else {}
-                goal_scored = 1 if info.get("score", {}).get("left", 0) > 0 or info.get("eventCode") == 2 else 0
+                goal_scored = 1 if info.get("score", {}).get("left", 0) > 0 else 0
 
                 self.episode_rewards.append(ep_rew)
                 self.episode_lengths.append(ep_len)
@@ -196,7 +196,7 @@ def run_ippo_training(timesteps: int = 200000, checkpoint_name: str = None) -> b
 
                 # Check goal in info
                 for agent_id, agent_info in infos.items():
-                    if agent_info.get("score", {}).get("left", 0) > 0 or agent_info.get("eventCode") == 2:
+                    if agent_info.get("score", {}).get("left", 0) > 0:
                         goals_scored += 1
                         break
 
