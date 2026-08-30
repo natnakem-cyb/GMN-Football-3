@@ -18,7 +18,7 @@ def collect_rollout(
     actor: SharedActor,
     critic: CentralizedCritic,
     num_steps: int = 256,
-) -> Dict[str, np.ndarray]:
+) -> Dict[str, Any]:
     """
     Collects a multi-agent rollout from the PettingZoo environment.
 
@@ -30,6 +30,7 @@ def collect_rollout(
     - values: shape (num_steps,) float32
     - rewards: shape (num_steps,) float32
     - dones: shape (num_steps,) bool
+    - completed_episodes: list of dicts with {"reward": float, "length": int, "goal": int}
     """
     buffer: Dict[str, list] = {
         "local_obs": [],      # per-agent, shape (num_steps, num_agents, 115)
@@ -40,8 +41,17 @@ def collect_rollout(
         "rewards": [],        # shape (num_steps,) — shared team reward
         "dones": [],          # shape (num_steps,)
     }
+    completed_episodes = []
 
-    obs_dict, _ = env.reset()
+    # Retrieve or initialize persistent rollout state on env
+    if not hasattr(env, "_mappo_obs") or env._mappo_obs is None:
+        obs_dict, _ = env.reset()
+        env._mappo_obs = obs_dict
+        env._mappo_ep_rew = 0.0
+        env._mappo_ep_len = 0
+    else:
+        obs_dict = env._mappo_obs
+
     agent_order = list(env.agents if env.agents else env.possible_agents)
     num_agents = len(agent_order)
 
@@ -70,6 +80,9 @@ def collect_rollout(
         done = any(terminations.values()) or any(truncations.values())
         shared_reward = float(rewards[current_agents[0]])  # identical across agents
 
+        env._mappo_ep_rew += shared_reward
+        env._mappo_ep_len += 1
+
         buffer["local_obs"].append(local_obs)
         buffer["global_state"].append(global_state)
         buffer["actions"].append(actions.cpu().numpy())
@@ -79,7 +92,23 @@ def collect_rollout(
         buffer["dones"].append(bool(done))
 
         if done:
+            # Check if left team scored a goal in the terminal step
+            goal_scored = 0
+            for agent_info in infos.values():
+                if agent_info.get("score", {}).get("left", 0) > 0:
+                    goal_scored = 1
+                    break
+
+            completed_episodes.append({
+                "reward": float(env._mappo_ep_rew),
+                "length": int(env._mappo_ep_len),
+                "goal": goal_scored,
+            })
+            env._mappo_ep_rew = 0.0
+            env._mappo_ep_len = 0
             obs_dict, _ = env.reset()
+
+    env._mappo_obs = obs_dict
 
     # Convert to structured numpy arrays
     res_buffer = {
@@ -90,6 +119,7 @@ def collect_rollout(
         "values": np.array(buffer["values"], dtype=np.float32),
         "rewards": np.array(buffer["rewards"], dtype=np.float32),
         "dones": np.array(buffer["dones"], dtype=np.bool_),
+        "completed_episodes": completed_episodes,
     }
 
     # Explicit shape assertions
