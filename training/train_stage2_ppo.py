@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from training.gmn_gym import GMNFootballEnv
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 
 class Stage2MetricsCallback(BaseCallback):
@@ -32,7 +33,8 @@ class Stage2MetricsCallback(BaseCallback):
         if done:
             self.episode_rewards.append(self.current_reward)
             self.episode_lengths.append(self.current_length)
-            is_goal = info.get("score", {}).get("left", 0) > 0 or info.get("event") == "GOAL"
+            ev = info.get("event", {})
+            is_goal = info.get("score", {}).get("left", 0) > 0 or (isinstance(ev, dict) and ev.get("type") == "goal")
             self.episode_goals.append(1 if is_goal else 0)
             self.current_reward = 0.0
             self.current_length = 0
@@ -49,23 +51,34 @@ def evaluate_stage2_policy(model, env, num_episodes: int = 100, deterministic: b
     goal_steps = []
 
     for ep in range(num_episodes):
-        obs, info = env.reset(seed=3000 + ep)
+        if isinstance(env, VecNormalize):
+            obs = env.reset()
+            info = env.reset_infos[0] if hasattr(env, "reset_infos") else {}
+        else:
+            obs, info = env.reset(seed=3000 + ep)
         ep_rew = 0.0
         ep_len = 0
         done = False
 
         while not done and ep_len < 1200:
             action, _ = model.predict(obs, deterministic=deterministic)
-            obs, reward, terminated, truncated, info = env.step(action)
+            if isinstance(env, VecNormalize):
+                obs, reward_arr, done_arr, info_list = env.step(action)
+                reward = float(reward_arr[0])
+                done = bool(done_arr[0])
+                info = info_list[0]
+            else:
+                obs, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
             ep_rew += reward
             ep_len += 1
-            done = terminated or truncated
 
         rewards.append(ep_rew)
         lengths.append(ep_len)
         final_distances.append(info.get("ballDistanceToGoal", 0.5))
 
-        is_goal = info.get("score", {}).get("left", 0) > 0 or info.get("event") == "GOAL"
+        ev = info.get("event", {})
+        is_goal = info.get("score", {}).get("left", 0) > 0 or (isinstance(ev, dict) and ev.get("type") == "goal")
         if is_goal:
             goals += 1
             goal_steps.append(ep_len)
@@ -103,7 +116,12 @@ def run_stage2_curriculum():
     print("GMN STAGE 2: ACADEMY RUN TO SCORE CURRICULUM TRAINING")
     print("==================================================")
 
-    env = GMNFootballEnv(scenario="academy_run_to_score", port=5050, use_ws=True)
+    def make_env():
+        return GMNFootballEnv(scenario="academy_run_to_score", port=5050, use_ws=True)
+
+    raw_env = make_env()
+    env = DummyVecEnv([lambda: raw_env])
+    env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=5.0)
 
     # 1. Zero-shot Evaluation of Stage 1 Model on Stage 2
     stage1_checkpoint = os.path.join(models_dir, "ppo_academy_empty_goal_100k.zip")
@@ -141,6 +159,7 @@ def run_stage2_curriculum():
 
         ckpt_path = os.path.join(models_dir, ckpt_name)
         model.save(ckpt_path)
+        env.save(ckpt_path.replace(".zip", "_vecnormalize.pkl"))
 
         print(f"Completed {label} in {dt:.1f}s ({fps:.1f} FPS). Saved to {ckpt_name}")
         eval_res = evaluate_stage2_policy(model, env, num_episodes=100)

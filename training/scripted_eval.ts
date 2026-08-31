@@ -46,7 +46,7 @@ export function evaluateScriptedAgent(numEpisodes = 100) {
 
       if (res.terminated || res.truncated) {
         done = true;
-        if (engine.score.left > 0 || res.info.event === 'GOAL') {
+        if (engine.score.left > 0 || (typeof res.info.event === 'object' && res.info.event?.type === 'goal')) {
           goals++;
         }
       }

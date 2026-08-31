@@ -104,8 +104,9 @@ def evaluate_checkpoint_deep(model, env, label: str, num_episodes: int = 100):
         lengths.append(ep_len)
         final_distances.append(info.get("ballDistanceToGoal", 0.5))
 
-        is_goal = info.get("score", {}).get("left", 0) > 0 or info.get("event") == "GOAL"
-        is_opponent_possession = info.get("event") == "DISPOSSESSED" or (
+        ev = info.get("event", {})
+        is_goal = info.get("score", {}).get("left", 0) > 0 or (isinstance(ev, dict) and ev.get("type") == "goal")
+        is_opponent_possession = (isinstance(ev, dict) and ev.get("type") == "interception") or (
             terminated and not is_goal and ep_len < 1200
         )
 

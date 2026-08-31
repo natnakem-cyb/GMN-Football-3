@@ -141,7 +141,7 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
     rewardSqSum += rew * rew;
     totalRewards++;
 
-    if (stepResult.info.event === 'GOAL') {
+    if (typeof stepResult.info.event === 'object' && stepResult.info.event?.type === 'goal') {
       goalsScored++;
     }
 

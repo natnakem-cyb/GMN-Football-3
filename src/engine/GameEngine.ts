@@ -417,10 +417,10 @@ export class GameEngine {
       if (this.goalResetTimer > 0) {
         this.goalResetTimer--;
         if (this.goalResetTimer <= 0) {
-          if (this.activeScenario) {
+          if (this.activeScenario && this.activeScenario.id.startsWith('academy')) {
             this.loadScenario(this.activeScenario);
           } else {
-            this.resetToKickoff();
+            this.resetToKickoff(false);
           }
         }
       } else {
@@ -480,12 +480,15 @@ export class GameEngine {
       shotTakenByLeft
     );
 
+    const isAcademyGoal = Boolean(
+      this.activeScenario?.id.startsWith('academy') && goalScoredThisTick !== null
+    );
     const isOpponentPossession = Boolean(
       this.activeScenario?.terminateOnOpponentPossession &&
       this.ball.ownerId &&
       this.players.find((p) => p.id === this.ball.ownerId)?.team === 'right'
     );
-    const isTerminated = this.status === 'fulltime' || goalScoredThisTick !== null || isOpponentPossession;
+    const isTerminated = this.status === 'fulltime' || isAcademyGoal || isOpponentPossession;
     const isTruncated = this.activeScenario ? this.matchTimeSeconds >= this.activeScenario.timeLimitSeconds : false;
 
     return {
@@ -995,10 +998,12 @@ export class GameEngine {
     this.ball.isShotInFlight = false;
   }
 
-  public resetToKickoff(): void {
+  public resetToKickoff(resetScore = false): void {
     this.status = 'playing';
     this.gameMode = GameMode.KickOff;
-    this.score = { left: 0, right: 0 };
+    if (resetScore) {
+      this.score = { left: 0, right: 0 };
+    }
     this.ball = this.createDefaultBall();
     this.players.forEach((p) => {
       p.hasBall = false;

@@ -94,7 +94,7 @@ export function runStage2Audit() {
 
         if (res.terminated || res.truncated) {
           done = true;
-          if (eng.score.left > 0 || res.info.event === 'GOAL') {
+          if (eng.score.left > 0 || (typeof res.info.event === 'object' && res.info.event?.type === 'goal')) {
             goals++;
           } else if (eng.ball.ownerId && eng.players.find((p) => p.id === eng.ball.ownerId)?.team === 'right') {
             dispossessed++;
@@ -189,7 +189,7 @@ export function runStage2Audit() {
 
         if (res.terminated || res.truncated) {
           done = true;
-          if (eng.score.left > 0 || res.info.event === 'GOAL') {
+          if (eng.score.left > 0 || (typeof res.info.event === 'object' && res.info.event?.type === 'goal')) {
             goals++;
           } else {
             dispossessed++;

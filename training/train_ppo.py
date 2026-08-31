@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from training.gmn_gym import GMNFootballEnv
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 
 def linear_schedule(initial_value: float) -> Callable[[float], float]:
@@ -43,7 +44,18 @@ def run_ppo_training(
     os.makedirs(logs_dir, exist_ok=True)
 
     print("\n1. Initializing Environment...")
-    env = GMNFootballEnv(scenario=scenario, port=5050, use_ws=True)
+    def make_env():
+        return GMNFootballEnv(scenario=scenario, port=5050, use_ws=True)
+
+    raw_env = make_env()
+    env = DummyVecEnv([lambda: raw_env])
+
+    vec_norm_path = resume_path.replace(".zip", "_vecnormalize.pkl") if resume_path else None
+    if vec_norm_path and os.path.exists(vec_norm_path):
+        print(f"Loading VecNormalize statistics from {vec_norm_path}...")
+        env = VecNormalize.load(vec_norm_path, env)
+    else:
+        env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=5.0)
 
     try:
         lr = linear_schedule(initial_lr) if lr_schedule == "linear" else initial_lr
@@ -81,11 +93,17 @@ def run_ppo_training(
         checkpoint_path = os.path.join(models_dir, out_name)
         print(f"\n4. Saving Model Checkpoint to: {checkpoint_path}...")
         model.save(checkpoint_path)
-        print("   ✓ Checkpoint saved successfully.")
+        vec_save_path = checkpoint_path.replace(".zip", "_vecnormalize.pkl")
+        env.save(vec_save_path)
+        print("   ✓ Checkpoint and VecNormalize statistics saved successfully.")
 
         # Verify loading model
         print("\n5. Testing Model Loading from Checkpoint...")
-        loaded_model = PPO.load(checkpoint_path)
+        eval_vec_env = DummyVecEnv([lambda: raw_env])
+        eval_vec_env = VecNormalize.load(vec_save_path, eval_vec_env)
+        eval_vec_env.training = False
+        eval_vec_env.norm_reward = False
+        loaded_model = PPO.load(checkpoint_path, env=eval_vec_env)
         print("   ✓ Checkpoint loaded successfully into memory.")
 
         # Run evaluation rollouts
@@ -94,17 +112,19 @@ def run_ppo_training(
         eval_goals = 0
 
         for ep in range(eval_episodes):
-            obs, info = env.reset(seed=100 + ep)
+            obs = eval_vec_env.reset()
             total_reward = 0.0
             steps = 0
             done = False
 
             while not done and steps < 300:
                 action, _states = loaded_model.predict(obs, deterministic=True)
-                obs, reward, terminated, truncated, info = env.step(action)
+                obs, reward_arr, done_arr, info_list = eval_vec_env.step(action)
+                reward = float(reward_arr[0])
+                done = bool(done_arr[0])
+                info = info_list[0]
                 total_reward += reward
                 steps += 1
-                done = terminated or truncated
 
             eval_rewards.append(total_reward)
             ev = info.get("event", {})
