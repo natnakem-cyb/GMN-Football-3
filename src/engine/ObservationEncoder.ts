@@ -174,9 +174,15 @@ export class ObservationEncoder {
       reward -= 1.0;
     }
 
-    // Checkpoint reward: moving ball towards opponent's goal (for left team, positive X)
+    // Checkpoint reward: moving ball towards opponent's goal (for left team, positive X; for right team, negative X)
     if (targetTeam === 'left') {
       const deltaX = currBallX - prevBallX;
+      if (deltaX > 0.005) {
+        checkpoint = Math.min(0.05, deltaX * 0.5);
+        reward += checkpoint;
+      }
+    } else if (targetTeam === 'right') {
+      const deltaX = prevBallX - currBallX; // moving left (toward right team's target goal at x=-1)
       if (deltaX > 0.005) {
         checkpoint = Math.min(0.05, deltaX * 0.5);
         reward += checkpoint;

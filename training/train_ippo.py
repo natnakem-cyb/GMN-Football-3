@@ -181,6 +181,8 @@ def run_ippo_training(timesteps: int = 200000, checkpoint_name: str = None) -> b
                 if not eval_pz_env.agents:
                     episodes_completed += 1
                     obs_dict, info_dict = eval_pz_env.reset(seed=100 + episodes_completed)
+                    if not eval_pz_env.agents:
+                        break
 
                 # Predict independently for each agent using the shared policy network
                 actions = {
@@ -196,7 +198,7 @@ def run_ippo_training(timesteps: int = 200000, checkpoint_name: str = None) -> b
 
                 # Check goal in info
                 for agent_id, agent_info in infos.items():
-                    if agent_info.get("score", {}).get("left", 0) > 0:
+                    if agent_info.get("score", {}).get("left", 0) > 0 or agent_info.get("eventCode") == 1:
                         goals_scored += 1
                         break
 

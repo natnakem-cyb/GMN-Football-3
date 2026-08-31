@@ -233,8 +233,8 @@ class GMNFootballEnv(gym.Env):
 
     def render(self):
         if self.render_mode == "rgb_array":
-            # Return dummy pitch frame representation for rgb_array mode
-            return np.zeros((100, 100, 3), dtype=np.uint8)
+            # TODO: Bridge /render endpoint not yet implemented. Returning placeholder.
+            return np.zeros((360, 640, 3), dtype=np.uint8)
         elif self.render_mode == "human":
             print(f"[GMNFootballEnv Step {self._step_count}] Scenario: {self.scenario}")
 
@@ -257,11 +257,3 @@ class GMNFootballEnv(gym.Env):
                 pass
             self.bridge_process.terminate()
             self.bridge_process = None
-
-
-# Registration for standard gym.make("GMNFootball-v0")
-gym.register(
-    id="GMNFootball-v0",
-    entry_point="training.gmn_gym:GMNFootballEnv",
-    max_episode_steps=900,
-)

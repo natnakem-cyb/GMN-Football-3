@@ -28,7 +28,7 @@ function runSeededSimulation(scenarioId: string, seed: number, actionSequence: n
   for (let t = 0; t < actionSequence.length; t++) {
     const actionIdx = actionSequence[t];
     const player = engine.players.find((p) => p.id === engine.controlledPlayerId) || engine.players[0];
-    const action = mapDiscreteAction(actionIdx, player.heading);
+    const action = mapDiscreteAction(actionIdx);
 
     const actionMap = new Map<string, AgentAction>();
     actionMap.set(player.id, action);

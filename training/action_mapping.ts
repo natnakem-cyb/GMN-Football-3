@@ -32,7 +32,7 @@ export { ACTION_SPACE_SIZE, ACTION_SCHEMA_VERSION };
 
 const SQRT_HALF = 0.7071067811865476;
 
-export function mapDiscreteAction(actionIdx: number, currentHeading = 0): AgentAction {
+export function mapDiscreteAction(actionIdx: number): AgentAction {
   if (typeof actionIdx !== 'number' || !Number.isInteger(actionIdx) || actionIdx < 0 || actionIdx >= ACTION_SPACE_SIZE) {
     throw new Error(
       `[GMN Action Mapping Error] Invalid action index: ${actionIdx}. Expected integer in range [0, ${ACTION_SPACE_SIZE - 1}].`

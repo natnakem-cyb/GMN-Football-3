@@ -480,13 +480,12 @@ export class GameEngine {
       shotTakenByLeft
     );
 
-    const isGoalScored = this.score.left > 0 || this.score.right > 0 || this.status === 'goal';
     const isOpponentPossession = Boolean(
       this.activeScenario?.terminateOnOpponentPossession &&
       this.ball.ownerId &&
       this.players.find((p) => p.id === this.ball.ownerId)?.team === 'right'
     );
-    const isTerminated = this.status === 'fulltime' || isGoalScored || isOpponentPossession;
+    const isTerminated = this.status === 'fulltime' || goalScoredThisTick !== null || isOpponentPossession;
     const isTruncated = this.activeScenario ? this.matchTimeSeconds >= this.activeScenario.timeLimitSeconds : false;
 
     return {
@@ -739,9 +738,6 @@ export class GameEngine {
         break;
 
       case ActionType.IDLE:
-      case ActionType.SPRINT:
-      case ActionType.RELEASE_SPRINT:
-      case ActionType.RELEASE_DRIBBLE:
       default:
         if (player.stickyDirection) {
           const speedMultiplier = player.isSprinting ? 1.3 : player.isDribbling ? 0.6 : 1.0;
@@ -1002,6 +998,7 @@ export class GameEngine {
   public resetToKickoff(): void {
     this.status = 'playing';
     this.gameMode = GameMode.KickOff;
+    this.score = { left: 0, right: 0 };
     this.ball = this.createDefaultBall();
     this.players.forEach((p) => {
       p.hasBall = false;
@@ -1084,7 +1081,7 @@ export class GameEngine {
 
     const frame: ReplayFrame = {
       tick: this.tickCount,
-      timestamp: Date.now(),
+      timestamp: this.matchTimeSeconds,
       matchTimeSeconds: this.matchTimeSeconds,
       ball: {
         position: { ...this.ball.position },

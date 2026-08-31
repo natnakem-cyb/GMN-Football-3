@@ -96,7 +96,7 @@ export class GMNBridgeService {
     ) || this.engine.players.find((p) => p.team === 'left');
 
     if (controlledPlayer) {
-      const mappedAction = mapDiscreteAction(actionIdx, controlledPlayer.heading);
+      const mappedAction = mapDiscreteAction(actionIdx);
       actionMap.set(controlledPlayer.id, mappedAction);
     }
 
@@ -157,8 +157,7 @@ export class GMNBridgeService {
 
     // 1. Controlled agents (left team), in fixed order
     controllableIds.forEach((id, i) => {
-      const player = this.engine.players.find((p) => p.id === id)!;
-      actionMap.set(id, mapDiscreteAction(actionIndices[i], player.heading));
+      actionMap.set(id, mapDiscreteAction(actionIndices[i]));
     });
 
     // 2. Automated bots for other players (if any)
@@ -423,6 +422,20 @@ wss.on('connection', (ws: WebSocket) => {
       }
     } catch (err: any) {
       console.error('[WS Error]', err);
+      try {
+        if (isBinary) {
+          // Send a zeroed-out binary frame with error sentinel so the client doesn't hang
+          const errBuf = Buffer.allocUnsafe(477);
+          errBuf.fill(0);
+          errBuf.writeFloatLE(-999.0, 0); // sentinel reward
+          errBuf.writeUInt8(1, 4);        // terminated = true
+          ws.send(errBuf, { binary: true });
+        } else {
+          ws.send(JSON.stringify({ error: err.message || 'Internal bridge error' }));
+        }
+      } catch (sendErr) {
+        console.error('[WS Error] Failed to send error response:', sendErr);
+      }
     }
   });
 });

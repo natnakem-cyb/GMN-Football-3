@@ -1,0 +1,12 @@
+# GMN-Football Python Training Dependencies
+gymnasium>=0.29.0
+stable-baselines3>=2.2.0
+torch>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
+websocket-client>=1.6.0
+pettingzoo>=1.24.0
+tqdm>=4.65.0
+matplotlib>=3.7.0
+onnx>=1.14.0
+onnxruntime>=1.15.0

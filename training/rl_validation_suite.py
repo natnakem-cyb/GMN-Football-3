@@ -33,7 +33,8 @@ class RLMetricsCallback(BaseCallback):
         if done:
             self.episode_rewards.append(self.current_reward)
             self.episode_lengths.append(self.current_length)
-            is_goal = info.get("score", {}).get("left", 0) > 0 or info.get("event") == "GOAL"
+            ev = info.get("event", {})
+            is_goal = info.get("score", {}).get("left", 0) > 0 or (isinstance(ev, dict) and ev.get("type") == "goal")
             self.episode_goals.append(1 if is_goal else 0)
             self.current_reward = 0.0
             self.current_length = 0
@@ -68,7 +69,8 @@ def run_random_baseline(total_steps: int = 10000):
         ball_distances.append(dist)
 
         if terminated or truncated:
-            is_goal = info.get("score", {}).get("left", 0) > 0 or info.get("event") == "GOAL"
+            ev = info.get("event", {})
+            is_goal = info.get("score", {}).get("left", 0) > 0 or (isinstance(ev, dict) and ev.get("type") == "goal")
             if is_goal:
                 goals += 1
             episode_rewards.append(current_reward)
@@ -125,7 +127,8 @@ def evaluate_policy(model, env, num_episodes: int = 100):
         rewards.append(ep_rew)
         lengths.append(ep_len)
         final_distances.append(info.get("ballDistanceToGoal", 0.5))
-        if info.get("score", {}).get("left", 0) > 0 or info.get("event") == "GOAL":
+        ev = info.get("event", {})
+        if info.get("score", {}).get("left", 0) > 0 or (isinstance(ev, dict) and ev.get("type") == "goal"):
             goals += 1
 
     return {

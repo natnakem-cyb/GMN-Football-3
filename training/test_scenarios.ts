@@ -49,7 +49,7 @@ for (const scenario of ACADEMY_SCENARIOS) {
     for (let step = 0; step < testActions.length; step++) {
       const actionIdx = testActions[step % ACTION_SPACE_SIZE];
       const player = engine.players.find((p) => p.id === engine.controlledPlayerId) || engine.players[0];
-      const mapped = mapDiscreteAction(actionIdx, player.heading);
+      const mapped = mapDiscreteAction(actionIdx);
 
       const actionMap = new Map<string, AgentAction>();
       actionMap.set(player.id, mapped);

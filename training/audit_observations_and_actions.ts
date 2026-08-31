@@ -101,7 +101,7 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
             actionMap.set(p.id, { type: ActionType.MOVE, direction: { x: dx / dist, y: dy / dist } });
           } else {
             const randActIdx = Math.floor(Math.random() * ACTION_SPACE_SIZE);
-            actionMap.set(p.id, mapDiscreteAction(randActIdx, p.heading));
+            actionMap.set(p.id, mapDiscreteAction(randActIdx));
           }
         }
       }

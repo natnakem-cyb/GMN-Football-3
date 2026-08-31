@@ -43,7 +43,9 @@ def evaluate_checkpoint(model_filename: str = "ppo_academy_empty_goal_smoke.zip"
         rewards.append(ep_rew)
         lengths.append(ep_len)
         final_distances.append(info.get("ballDistanceToGoal", 0.5))
-        if info.get("score", {}).get("left", 0) > 0 or info.get("event") == "GOAL":
+        event = info.get("event", {})
+        is_goal = info.get("score", {}).get("left", 0) > 0 or (isinstance(event, dict) and event.get("type") == "goal")
+        if is_goal:
             goals += 1
 
     mean_rew = float(np.mean(rewards))

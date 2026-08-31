@@ -8,10 +8,10 @@ export class PhysicsEngine {
   static AIR_DRAG = 0.988;
   static GROUND_FRICTION = 0.965;
   static BOUNCE_RESTITUTION = 0.65;
-  static PLAYER_ACCELERATION = 0.0035;
-  static PLAYER_MAX_SPEED = 0.016;
+  static PLAYER_ACCELERATION = 0.21;
+  static PLAYER_MAX_SPEED = 0.96;
   static SPRINT_MULTIPLIER = 1.35;
-  static TACKLE_SPEED = 0.028;
+  static TACKLE_SPEED = 1.68;
   static BALL_CONTROL_DIST = 0.038;
 
   // Step ball simulation
@@ -39,13 +39,13 @@ export class PhysicsEngine {
     }
 
     // Free ball dynamics
-    ball.position.x += ball.velocity.x;
-    ball.position.y += ball.velocity.y;
-    ball.position.z += ball.velocity.z;
+    ball.position.x += ball.velocity.x * dt;
+    ball.position.y += ball.velocity.y * dt;
+    ball.position.z += ball.velocity.z * dt;
 
     // Apply gravity
     if (ball.position.z > 0 || ball.velocity.z !== 0) {
-      ball.velocity.z -= (PhysicsEngine.GRAVITY * 0.0006);
+      ball.velocity.z -= PhysicsEngine.GRAVITY * dt;
       ball.velocity.x *= PhysicsEngine.AIR_DRAG;
       ball.velocity.y *= PhysicsEngine.AIR_DRAG;
       ball.isInAir = true;
@@ -60,7 +60,7 @@ export class PhysicsEngine {
     // Ground bounce
     if (ball.position.z <= 0) {
       ball.position.z = 0;
-      if (Math.abs(ball.velocity.z) > 0.005) {
+      if (Math.abs(ball.velocity.z) > 0.3) {
         ball.velocity.z = -ball.velocity.z * PhysicsEngine.BOUNCE_RESTITUTION;
         ball.velocity.x *= 0.92;
         ball.velocity.y *= 0.92;
@@ -70,7 +70,7 @@ export class PhysicsEngine {
     }
 
     // Stop negligible velocities
-    if (Vec3.length(ball.velocity) < 0.0002) {
+    if (Vec3.length(ball.velocity) < 0.012) {
       ball.velocity = { x: 0, y: 0, z: 0 };
     }
   }
@@ -80,8 +80,8 @@ export class PhysicsEngine {
     // Tackle state
     if (player.isTackling) {
       player.tackleCooldown -= 1;
-      player.position.x += player.velocity.x;
-      player.position.y += player.velocity.y;
+      player.position.x += player.velocity.x * dt;
+      player.position.y += player.velocity.y * dt;
       player.velocity.x *= 0.88;
       player.velocity.y *= 0.88;
 
@@ -116,7 +116,7 @@ export class PhysicsEngine {
       }
 
       // Acceleration towards desired velocity
-      const targetVel = Vec2.scale(dir, Math.min(maxSpeed, distToTarget * 0.2));
+      const targetVel = Vec2.scale(dir, Math.min(maxSpeed, distToTarget * 12.0));
       player.velocity.x = player.velocity.x * 0.75 + targetVel.x * 0.25;
       player.velocity.y = player.velocity.y * 0.75 + targetVel.y * 0.25;
     } else {
@@ -126,8 +126,8 @@ export class PhysicsEngine {
     }
 
     // Apply movement
-    player.position.x += player.velocity.x;
-    player.position.y += player.velocity.y;
+    player.position.x += player.velocity.x * dt;
+    player.position.y += player.velocity.y * dt;
 
     // Pitch boundary clamping for players
     player.position.x = Math.max(PITCH.minX - 0.05, Math.min(PITCH.maxX + 0.05, player.position.x));
@@ -143,7 +143,7 @@ export class PhysicsEngine {
     loft = 0
   ): void {
     const dir = Vec2.normalize(direction);
-    const kickSpeed = 0.015 + (player.stats.kickPower / 100) * 0.045 * Math.min(1, Math.max(0.1, power));
+    const kickSpeed = 0.9 + (player.stats.kickPower / 100) * 2.7 * Math.min(1, Math.max(0.1, power));
     
     ball.ownerId = null;
     player.hasBall = false;
@@ -153,7 +153,7 @@ export class PhysicsEngine {
     ball.velocity = {
       x: dir.x * kickSpeed,
       y: dir.y * kickSpeed,
-      z: loft * 0.022 * power,
+      z: loft * 1.32 * power,
     };
   }
 
@@ -206,9 +206,9 @@ export class PhysicsEngine {
             : (((roll * 10) % 1) - 0.5) * 0.4;
           const kickDir = Vec2.fromAngle(player.heading + angleOffset);
           ball.velocity = {
-            x: kickDir.x * 0.02,
-            y: kickDir.y * 0.02,
-            z: 0.005,
+            x: kickDir.x * 1.2,
+            y: kickDir.y * 1.2,
+            z: 0.3,
           };
           return 'success';
         }

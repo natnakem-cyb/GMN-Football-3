@@ -156,6 +156,11 @@ class GMNMultiAgentEnv(ParallelEnv):
         """
         Resets the multi-agent environment and returns per-agent initial observations.
         """
+        if getattr(self, "_needs_bridge", False):
+            self._ensure_bridge_running()
+            self._connect_ws()
+            self._needs_bridge = False
+
         self._step_count = 0
 
         target_scenario = self.scenario
@@ -249,6 +254,8 @@ class GMNMultiAgentEnv(ParallelEnv):
             self.ws_client.send(bytes(action_bytes))
             data = self.ws_client.recv()
 
+        if isinstance(data, str):
+            raise RuntimeError(f"[GMN-PettingZoo] Bridge sent text error: {data}")
         if not isinstance(data, (bytes, bytearray)):
             raise RuntimeError(f"[GMN-PettingZoo] Expected binary WebSocket frame, got {type(data)}")
 
@@ -334,3 +341,4 @@ class GMNMultiAgentEnv(ParallelEnv):
         self.__dict__.update(state)
         self.bridge_process = None
         self.ws_client = None
+        self._needs_bridge = True
