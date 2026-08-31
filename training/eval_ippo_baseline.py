@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import numpy as np
 from stable_baselines3 import PPO
 from training.gmn_pettingzoo import GMNMultiAgentEnv
+from training.episode_recorder import EpisodeRecorder
 
 # Reference Stage 2 Baseline Metrics for academy_3_vs_1_with_keeper
 STAGE_2_BASELINE = {
@@ -31,12 +32,16 @@ def evaluate_ippo_baseline(
     num_episodes: int = 50,
     deterministic: bool = True,
     base_seed: int = 500000,
+    save_replay: bool = False,
+    save_replay_episodes: int = 1,
 ) -> Dict[str, Any]:
     print("========================================================================")
     print("GMN-FOOTBALL-3 — IPPO MULTI-AGENT EVALUATION vs. STAGE 2 BASELINE")
     print(f"Model Checkpoint: {checkpoint_name}")
     print(f"Evaluation Budget: {num_episodes} Episodes | Policy Mode: {'Deterministic' if deterministic else 'Stochastic'}")
     print("Scenario: academy_3_vs_1_with_keeper (3 Left IPPO vs. 1 CB + 1 GK Rule-Based)")
+    if save_replay:
+        print(f"Replay Recording: ENABLED (Saving first {save_replay_episodes} episode traces to training/replays/)")
     print("========================================================================\n")
 
     models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "models"))
@@ -85,6 +90,16 @@ def evaluate_ippo_baseline(
             last_truncated = False
             last_info = {}
 
+            recorder = None
+            if save_replay and (ep + 1) <= save_replay_episodes:
+                controllable_agents = list(env.possible_agents)
+                recorder = EpisodeRecorder(
+                    scenario="academy_3_vs_1_with_keeper",
+                    seed=seed,
+                    agent_ids=controllable_agents,
+                    checkpoint=checkpoint_name,
+                )
+
             # Max steps for 15s scenario (+ buffer)
             max_steps = 900 + 120
 
@@ -105,8 +120,10 @@ def evaluate_ippo_baseline(
                 obs_dict, rewards, terminations, truncations, infos = env.step(actions)
 
                 # Record team reward from primary agent
+                step_reward = 0.0
                 if env.possible_agents and env.possible_agents[0] in rewards:
-                    ep_reward += rewards[env.possible_agents[0]]
+                    step_reward = float(rewards[env.possible_agents[0]])
+                    ep_reward += step_reward
 
                 # Any agent termination/truncation represents episode termination
                 if terminations:
@@ -114,14 +131,39 @@ def evaluate_ippo_baseline(
                 if truncations:
                     last_truncated = any(truncations.values())
 
+                step_event = None
+                step_score = {"left": 0, "right": 0}
                 if infos:
                     # Take info from first available agent
                     for agent_id, agent_info in infos.items():
                         last_info = agent_info
+                        if "score" in agent_info:
+                            step_score = agent_info["score"]
+                        ev = agent_info.get("event")
+                        if isinstance(ev, dict) and "type" in ev:
+                            step_event = ev["type"]
+                        elif isinstance(ev, str):
+                            step_event = ev
                         break
+
+                if recorder is not None:
+                    recorder.record_step(
+                        tick=step_count - 1,
+                        actions=actions,
+                        observations=obs_dict,
+                        reward=step_reward,
+                        terminated=last_terminated,
+                        truncated=last_truncated,
+                        score=step_score,
+                        event=step_event,
+                    )
 
                 if last_terminated or last_truncated or not env.agents:
                     ep_done = True
+
+            if recorder is not None:
+                saved_path = recorder.close()
+                print(f"   [Replay Saved] Episode {ep + 1} -> {saved_path}")
 
             total_steps += step_count
             total_time_sec += step_count / 60.0
@@ -247,17 +289,51 @@ if __name__ == "__main__":
         action="store_true",
         help="Run both deterministic and stochastic evaluations back-to-back",
     )
+    parser.add_argument(
+        "--save-replay",
+        action="store_true",
+        help="Record JSONL episode traces to training/replays/",
+    )
+    parser.add_argument(
+        "--save-replay-episodes",
+        type=int,
+        default=1,
+        help="Max number of replay episodes to record (default: 1)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=500000,
+        help="Base environment seed",
+    )
 
     args = parser.parse_args()
 
     if args.compare_both:
         print(">>> EVALUATION PASS 1: DETERMINISTIC ACTIONS <<<")
-        evaluate_ippo_baseline(checkpoint_name=args.checkpoint, num_episodes=args.episodes, deterministic=True)
+        evaluate_ippo_baseline(
+            checkpoint_name=args.checkpoint,
+            num_episodes=args.episodes,
+            deterministic=True,
+            base_seed=args.seed,
+            save_replay=args.save_replay,
+            save_replay_episodes=args.save_replay_episodes,
+        )
         print("\n>>> EVALUATION PASS 2: STOCHASTIC ACTIONS <<<")
-        evaluate_ippo_baseline(checkpoint_name=args.checkpoint, num_episodes=args.episodes, deterministic=False)
+        evaluate_ippo_baseline(
+            checkpoint_name=args.checkpoint,
+            num_episodes=args.episodes,
+            deterministic=False,
+            base_seed=args.seed,
+            save_replay=args.save_replay,
+            save_replay_episodes=args.save_replay_episodes,
+        )
     else:
         evaluate_ippo_baseline(
             checkpoint_name=args.checkpoint,
             num_episodes=args.episodes,
             deterministic=not args.stochastic,
+            base_seed=args.seed,
+            save_replay=args.save_replay,
+            save_replay_episodes=args.save_replay_episodes,
         )

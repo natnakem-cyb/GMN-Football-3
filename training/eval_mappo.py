@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from training.gmn_pettingzoo import GMNMultiAgentEnv
 from training.mappo_networks import SharedActor
+from training.episode_recorder import EpisodeRecorder
 
 
 def evaluate_mappo(
@@ -21,11 +22,16 @@ def evaluate_mappo(
     scenario: str = "academy_3_vs_1_with_keeper",
     num_episodes: int = 50,
     deterministic: bool = True,
+    save_replay: bool = False,
+    save_replay_episodes: int = 1,
+    base_seed: int = 500000,
 ):
     print("==================================================")
     print("GMN-FOOTBALL-3 — MAPPO EVALUATION RUNNER")
     print(f"Model Checkpoint: {checkpoint_path}")
     print(f"Scenario: {scenario} | Episodes: {num_episodes} | Deterministic: {deterministic}")
+    if save_replay:
+        print(f"Replay Recording: ENABLED (Saving first {save_replay_episodes} episode traces to training/replays/)")
     print("==================================================")
 
     if not os.path.exists(checkpoint_path):
@@ -45,10 +51,20 @@ def evaluate_mappo(
     goals_list = []
 
     for ep in range(1, num_episodes + 1):
-        obs_dict, _ = env.reset()
+        ep_seed = base_seed + ep
+        obs_dict, _ = env.reset(seed=ep_seed)
         ep_reward = 0.0
         ep_length = 0
         goal_scored = 0
+
+        recorder = None
+        if save_replay and ep <= save_replay_episodes:
+            recorder = EpisodeRecorder(
+                scenario=scenario,
+                seed=ep_seed,
+                agent_ids=controllable_agents,
+                checkpoint=os.path.basename(checkpoint_path),
+            )
 
         while True:
             current_agents = list(env.agents if env.agents else controllable_agents)
@@ -65,17 +81,47 @@ def evaluate_mappo(
             action_dict = {a: int(actions[i].item()) for i, a in enumerate(current_agents)}
             obs_dict, rewards, terminations, truncations, infos = env.step(action_dict)
 
-            shared_rew = float(rewards[current_agents[0]])
+            shared_rew = float(rewards[current_agents[0]]) if current_agents and current_agents[0] in rewards else 0.0
             ep_reward += shared_rew
             ep_length += 1
 
-            done = any(terminations.values()) or any(truncations.values())
-            if done:
+            term = any(terminations.values()) if terminations else False
+            trunc = any(truncations.values()) if truncations else False
+            done = term or trunc
+
+            step_event = None
+            step_score = {"left": 0, "right": 0}
+            if infos:
                 for agent_info in infos.values():
-                    if agent_info.get("score", {}).get("left", 0) > 0:
-                        goal_scored = 1
-                        break
+                    if "score" in agent_info:
+                        step_score = agent_info["score"]
+                    ev = agent_info.get("event")
+                    if isinstance(ev, dict) and "type" in ev:
+                        step_event = ev["type"]
+                    elif isinstance(ev, str):
+                        step_event = ev
+                    break
+
+            if recorder is not None:
+                recorder.record_step(
+                    tick=ep_length - 1,
+                    actions=action_dict,
+                    observations=obs_dict,
+                    reward=shared_rew,
+                    terminated=term,
+                    truncated=trunc,
+                    score=step_score,
+                    event=step_event,
+                )
+
+            if done:
+                if step_score.get("left", 0) > 0:
+                    goal_scored = 1
                 break
+
+        if recorder is not None:
+            saved_path = recorder.close()
+            print(f"   [Replay Saved] Episode {ep} -> {saved_path}")
 
         rewards_list.append(ep_reward)
         lengths_list.append(ep_length)
@@ -116,6 +162,9 @@ if __name__ == "__main__":
     parser.add_argument("--scenario", type=str, default="academy_3_vs_1_with_keeper")
     parser.add_argument("--episodes", type=int, default=50)
     parser.add_argument("--stochastic", action="store_true")
+    parser.add_argument("--save-replay", action="store_true", help="Record JSONL episode traces to training/replays/")
+    parser.add_argument("--save-replay-episodes", type=int, default=1, help="Max number of replay episodes to record (default: 1)")
+    parser.add_argument("--seed", type=int, default=500000, help="Base environment seed")
     args = parser.parse_args()
 
     evaluate_mappo(
@@ -123,4 +172,7 @@ if __name__ == "__main__":
         scenario=args.scenario,
         num_episodes=args.episodes,
         deterministic=not args.stochastic,
+        save_replay=args.save_replay,
+        save_replay_episodes=args.save_replay_episodes,
+        base_seed=args.seed,
     )

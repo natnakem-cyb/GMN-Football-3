@@ -33,6 +33,22 @@ ACTION_SCHEMA_VERSION = "discrete19_v1"
 OBSERVATION_DIM = 115
 ACTION_SPACE_SIZE = 19
 
+EVENT_CODE_MAP = [
+    None,
+    "goal",
+    "shot",
+    "shot_saved",
+    "shot_missed",
+    "pass",
+    "interception",
+    "tackle",
+    "foul",
+    "kickoff",
+    "out_of_bounds",
+    "scenario_complete",
+    "scenario_failed",
+]
+
 
 class GMNMultiAgentEnv(ParallelEnv):
     """
@@ -258,6 +274,10 @@ class GMNMultiAgentEnv(ParallelEnv):
             "eventCode": int(event_code),
             "step": self._step_count,
         }
+        if 0 < event_code < len(EVENT_CODE_MAP):
+            ev_type = EVENT_CODE_MAP[event_code]
+            if ev_type:
+                shared_info["event"] = {"type": ev_type}
 
         observations: Dict[str, np.ndarray] = {}
         rewards: Dict[str, float] = {}
