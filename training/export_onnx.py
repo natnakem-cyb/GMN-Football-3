@@ -1,174 +1,214 @@
 """
-Export MAPPO Actor Network from PyTorch Checkpoint to ONNX.
-Produces public/models/mappo_policy.onnx and validates parity.
+Export MAPPO Actor Network from PyTorch Checkpoint to ONNX using torch.onnx.export.
+Produces public/models/mappo_policy.onnx and validates parity against PyTorch model and checkpoint weights.
 """
 
+import argparse
 import os
 import sys
-import math
-import struct
-import zipfile
-from typing import Dict, List, Tuple
+import json
+import numpy as np
+import torch
+import torch.nn as nn
+import onnx
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from training.onnx_proto_builder import (
-    build_attribute_proto_float,
-    build_attribute_proto_int,
-    build_graph_proto,
-    build_model_proto,
-    build_node_proto,
-    build_tensor_proto,
-    build_value_info_proto,
-)
+from training.mappo_networks import SharedActor
 
 
-def extract_actor_weights(checkpoint_path: str) -> Dict[str, Tuple[List[int], bytes]]:
+class ActorPolicyOnnxModule(nn.Module):
     """
-    Extracts raw actor weights from PyTorch zip checkpoint.
-    Actor mapping in SharedActor (Sequential):
-    - net.0.weight: (64, 115) float32 -> storage data/0
-    - net.0.bias: (64,) float32 -> storage data/1
-    - net.2.weight: (64, 64) float32 -> storage data/2
-    - net.2.bias: (64,) float32 -> storage data/3
-    - net.4.weight: (19, 64) float32 -> storage data/4
-    - net.4.bias: (19,) float32 -> storage data/5
+    Wrapper around SharedActor's underlying MLP network for deterministic ONNX export.
+    Maps input observation tensor (batch_size, 115) -> action logits (batch_size, 19).
     """
-    with zipfile.ZipFile(checkpoint_path, "r") as z:
-        prefix = None
-        for name in z.namelist():
-            if name.endswith("data.pkl"):
-                prefix = name.split("/")[0]
-                break
-        if not prefix:
-            raise ValueError(f"Invalid PyTorch checkpoint archive at: {checkpoint_path}")
+    def __init__(self, actor: SharedActor):
+        super().__init__()
+        self.net = actor.net
 
-        w0 = z.read(f"{prefix}/data/0")
-        b0 = z.read(f"{prefix}/data/1")
-        w1 = z.read(f"{prefix}/data/2")
-        b1 = z.read(f"{prefix}/data/3")
-        w2 = z.read(f"{prefix}/data/4")
-        b2 = z.read(f"{prefix}/data/5")
-
-    return {
-        "w0": ([64, 115], w0),
-        "b0": ([64], b0),
-        "w1": ([64, 64], w1),
-        "b1": ([64], b1),
-        "w2": ([19, 64], w2),
-        "b2": ([19], b2),
-    }
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.net(obs)
 
 
-def compute_reference_forward(obs: List[float], weights: Dict[str, Tuple[List[int], bytes]]) -> List[float]:
-    """
-    Direct reference evaluation of the MLP:
-    h0 = tanh(obs @ w0.T + b0)
-    h1 = tanh(h0 @ w1.T + b1)
-    logits = h1 @ w2.T + b2
-    """
-    w0_floats = struct.unpack(f"<{len(weights['w0'][1])//4}f", weights["w0"][1])
-    b0_floats = struct.unpack(f"<{len(weights['b0'][1])//4}f", weights["b0"][1])
-    w1_floats = struct.unpack(f"<{len(weights['w1'][1])//4}f", weights["w1"][1])
-    b1_floats = struct.unpack(f"<{len(weights['b1'][1])//4}f", weights["b1"][1])
-    w2_floats = struct.unpack(f"<{len(weights['w2'][1])//4}f", weights["w2"][1])
-    b2_floats = struct.unpack(f"<{len(weights['b2'][1])//4}f", weights["b2"][1])
+def export_to_onnx(
+    checkpoint_path: str = "training/models/mappo_academy_3_vs_1_with_keeper_trained.pt",
+    output_path: str = "public/models/mappo_policy.onnx",
+    ts_weights_path: str = "src/agents/mappo_weights.ts",
+):
+    print("==================================================")
+    print("MAPPO ACTOR POLICY ONNX EXPORT & WEIGHT VERIFICATION")
+    print(f"Source PyTorch Checkpoint: {checkpoint_path}")
+    print(f"Target ONNX Model Output:  {output_path}")
+    print(f"Target TS Weights Output:  {ts_weights_path}")
+    print("==================================================")
 
-    # Layer 0: Linear(115, 64) -> Tanh
-    h0 = [0.0] * 64
-    for i in range(64):
-        s = b0_floats[i]
-        for j in range(115):
-            s += w0_floats[i * 115 + j] * obs[j]
-        h0[i] = math.tanh(s)
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Source checkpoint not found at: {checkpoint_path}")
 
-    # Layer 1: Linear(64, 64) -> Tanh
-    h1 = [0.0] * 64
-    for i in range(64):
-        s = b1_floats[i]
-        for j in range(64):
-            s += w1_floats[i * 64 + j] * h0[j]
-        h1[i] = math.tanh(s)
+    # 1. Load PyTorch checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    obs_dim = checkpoint.get("obs_dim", 115)
+    action_dim = checkpoint.get("action_dim", 19)
+    timesteps = checkpoint.get("timesteps", "unknown")
 
-    # Layer 2: Linear(64, 19)
-    logits = [0.0] * 19
-    for i in range(19):
-        s = b2_floats[i]
-        for j in range(64):
-            s += w2_floats[i * 64 + j] * h1[j]
-        logits[i] = s
+    print(f"\n1. Loaded Checkpoint:")
+    print(f"   Timesteps: {timesteps} | Obs Dim: {obs_dim} | Action Dim: {action_dim}")
 
-    return logits
+    actor = SharedActor(obs_dim=obs_dim, action_dim=action_dim, hidden=64)
+    actor.load_state_dict(checkpoint["actor"])
+    actor.eval()
 
+    model = ActorPolicyOnnxModule(actor)
+    model.eval()
 
-def export_to_onnx(checkpoint_path: str, output_path: str):
-    print(f"Loading weights from checkpoint: {checkpoint_path}")
-    weights = extract_actor_weights(checkpoint_path)
+    # 2. Export to ONNX via torch.onnx.export
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    dummy_input = torch.randn(1, obs_dim, dtype=torch.float32)
 
-    # Build Initializer Tensors (FLOAT = 1)
-    init_w0 = build_tensor_proto("w0", [64, 115], 1, weights["w0"][1])
-    init_b0 = build_tensor_proto("b0", [64], 1, weights["b0"][1])
-    init_w1 = build_tensor_proto("w1", [64, 64], 1, weights["w1"][1])
-    init_b1 = build_tensor_proto("b1", [64], 1, weights["b1"][1])
-    init_w2 = build_tensor_proto("w2", [19, 64], 1, weights["w2"][1])
-    init_b2 = build_tensor_proto("b2", [19], 1, weights["b2"][1])
-
-    initializers = [init_w0, init_b0, init_w1, init_b1, init_w2, init_b2]
-
-    # Graph Inputs & Outputs
-    # Input 'obs': shape ['batch_size', 115]
-    input_obs = build_value_info_proto("obs", 1, ["batch_size", 115])
-    output_logits = build_value_info_proto("action_logits", 1, ["batch_size", 19])
-
-    # Nodes:
-    # 1. Gemm(obs, w0, b0, transB=1, alpha=1.0, beta=1.0) -> gemm0_out
-    # 2. Tanh(gemm0_out) -> tanh0_out
-    # 3. Gemm(tanh0_out, w1, b1, transB=1, alpha=1.0, beta=1.0) -> gemm1_out
-    # 4. Tanh(gemm1_out) -> tanh1_out
-    # 5. Gemm(tanh1_out, w2, b2, transB=1, alpha=1.0, beta=1.0) -> action_logits
-
-    gemm_attrs = [
-        build_attribute_proto_int("transB", 1),
-        build_attribute_proto_float("alpha", 1.0),
-        build_attribute_proto_float("beta", 1.0),
-    ]
-
-    node1 = build_node_proto("Gemm", ["obs", "w0", "b0"], ["gemm0_out"], name="Gemm_0", attributes=gemm_attrs)
-    node2 = build_node_proto("Tanh", ["gemm0_out"], ["tanh0_out"], name="Tanh_0")
-    node3 = build_node_proto("Gemm", ["tanh0_out", "w1", "b1"], ["gemm1_out"], name="Gemm_1", attributes=gemm_attrs)
-    node4 = build_node_proto("Tanh", ["gemm1_out"], ["tanh1_out"], name="Tanh_1")
-    node5 = build_node_proto("Gemm", ["tanh1_out", "w2", "b2"], ["action_logits"], name="Gemm_2", attributes=gemm_attrs)
-
-    nodes = [node1, node2, node3, node4, node5]
-
-    graph = build_graph_proto(
-        name="MAPPO_Actor_Policy",
-        nodes=nodes,
-        inputs=[input_obs],
-        outputs=[output_logits],
-        initializers=initializers,
+    print(f"\n2. Exporting model using torch.onnx.export (opset 17)...")
+    torch.onnx.export(
+        model,
+        dummy_input,
+        output_path,
+        export_params=True,
+        opset_version=17,
+        do_constant_folding=True,
+        input_names=["obs"],
+        output_names=["action_logits"],
+        dynamic_axes={
+            "obs": {0: "batch_size"},
+            "action_logits": {0: "batch_size"},
+        },
     )
 
-    model = build_model_proto(graph, opset_version=17, producer_name="GMN-Football-3")
+    # Ensure single self-contained ONNX model (no external data split)
+    onnx_model = onnx.load(output_path, load_external_data=True)
+    onnx.save(onnx_model, output_path)
+    data_sidecar = output_path + ".data"
+    if os.path.exists(data_sidecar):
+        os.remove(data_sidecar)
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "wb") as f:
-        f.write(model)
+    onnx_size = os.path.getsize(output_path)
+    print(f"   ✓ Self-contained ONNX export successful: {output_path} ({onnx_size} bytes)")
 
-    print(f"Successfully exported ONNX policy model to: {output_path} ({len(model)} bytes)")
+    # 3. Check ONNX model validity with onnx package
+    onnx.checker.check_model(onnx_model)
+    print("   ✓ ONNX model syntax and topology verified with onnx.checker.check_model.")
 
-    # Parity check against deterministic test observation
-    test_obs = [(i * 0.031) - 0.5 for i in range(115)]
-    ref_logits = compute_reference_forward(test_obs, weights)
-    print(f"Reference Forward Evaluation Logits for Test Obs:\n  {ref_logits[:5]} ... (len={len(ref_logits)})")
-    print(f"Best Action Index: {ref_logits.index(max(ref_logits))}")
+    # 4. Extract weights from PyTorch state dict and compare against ONNX initializers
+    print(f"\n3. Verifying Layer Weight & Bias Parity between PyTorch Checkpoint and ONNX...")
+    state_dict = actor.state_dict()
+    pt_w0 = state_dict["net.0.weight"].numpy() # (64, 115)
+    pt_b0 = state_dict["net.0.bias"].numpy()   # (64,)
+    pt_w1 = state_dict["net.2.weight"].numpy() # (64, 64)
+    pt_b1 = state_dict["net.2.bias"].numpy()   # (64,)
+    pt_w2 = state_dict["net.4.weight"].numpy() # (19, 64)
+    pt_b2 = state_dict["net.4.bias"].numpy()   # (19,)
+
+    onnx_tensors = {}
+    for init in onnx_model.graph.initializer:
+        arr = onnx.numpy_helper.to_array(init)
+        onnx_tensors[init.name] = arr
+
+    print(f"   PyTorch net.0.weight shape: {pt_w0.shape}, mean: {pt_w0.mean():.6f}, std: {pt_w0.std():.6f}")
+    print(f"   PyTorch net.2.weight shape: {pt_w1.shape}, mean: {pt_w1.mean():.6f}, std: {pt_w1.std():.6f}")
+    print(f"   PyTorch net.4.weight shape: {pt_w2.shape}, mean: {pt_w2.mean():.6f}, std: {pt_w2.std():.6f}")
+
+    # Match weights in ONNX graph
+    found_weights = 0
+    for name, arr in onnx_tensors.items():
+        if arr.shape == (64, 115):
+            diff = np.max(np.abs(arr - pt_w0))
+            print(f"   ✓ Layer 0 Weight matched in ONNX ({name}): max diff = {diff:.10e}")
+            assert diff == 0.0, f"Layer 0 weight mismatch: {diff}"
+            found_weights += 1
+        elif arr.shape == (64, 64):
+            diff = np.max(np.abs(arr - pt_w1))
+            print(f"   ✓ Layer 1 Weight matched in ONNX ({name}): max diff = {diff:.10e}")
+            assert diff == 0.0, f"Layer 1 weight mismatch: {diff}"
+            found_weights += 1
+        elif arr.shape == (19, 64):
+            diff = np.max(np.abs(arr - pt_w2))
+            print(f"   ✓ Layer 2 Weight matched in ONNX ({name}): max diff = {diff:.10e}")
+            assert diff == 0.0, f"Layer 2 weight mismatch: {diff}"
+            found_weights += 1
+
+    assert found_weights >= 3, f"Could not match all weight layers in ONNX model (found {found_weights})"
+
+    # 5. Check distinction from smoke checkpoint
+    smoke_path = "training/models/mappo_academy_3_vs_1_with_keeper_smoke.pt"
+    if os.path.exists(smoke_path):
+        smoke_ckpt = torch.load(smoke_path, map_location="cpu")
+        smoke_w0 = smoke_ckpt["actor"]["net.0.weight"].numpy()
+        smoke_w2 = smoke_ckpt["actor"]["net.4.weight"].numpy()
+        diff_w0 = np.max(np.abs(pt_w0 - smoke_w0))
+        diff_w2 = np.max(np.abs(pt_w2 - smoke_w2))
+        print(f"\n4. Distinctness Check against SMOKE Checkpoint ({smoke_path}):")
+        print(f"   Max abs difference in Layer 0 weight (w0): {diff_w0:.6f}")
+        print(f"   Max abs difference in Layer 2 weight (w2): {diff_w2:.6f}")
+        assert diff_w0 > 0.01, f"Trained checkpoint weights are identical to smoke checkpoint! diff={diff_w0}"
+        print(f"   ✓ Confirmed: Trained checkpoint is distinct from smoke checkpoint (w0 max diff: {diff_w0:.6f}).")
+
+    # 6. Generate synchronized TypeScript embedded weights file
+    print(f"\n5. Generating TypeScript Embedded Weights file: {ts_weights_path}...")
+    ts_content = f"""// AUTO-GENERATED BY training/export_onnx.py
+// Synchronized exact weights from: {checkpoint_path}
+// Timesteps trained: {timesteps}
+
+export const MAPPO_WEIGHTS = {{
+  sourceCheckpoint: {json.dumps(checkpoint_path)},
+  timesteps: {json.dumps(timesteps)},
+  w0: {json.dumps(pt_w0.flatten().tolist())},
+  b0: {json.dumps(pt_b0.tolist())},
+  w1: {json.dumps(pt_w1.flatten().tolist())},
+  b1: {json.dumps(pt_b1.tolist())},
+  w2: {json.dumps(pt_w2.flatten().tolist())},
+  b2: {json.dumps(pt_b2.tolist())},
+}};
+"""
+    with open(ts_weights_path, "w") as f:
+        f.write(ts_content)
+
+    print(f"   ✓ Saved synchronized TypeScript weights ({os.path.getsize(ts_weights_path)} bytes).")
+
+    # 7. Verification inference test
+    test_obs = torch.tensor([[(i * 0.031) - 0.5 for i in range(115)]], dtype=torch.float32)
+    with torch.no_grad():
+        pt_logits = model(test_obs).numpy()[0]
+
+    print(f"\n6. Deterministic Forward Pass Test:")
+    print(f"   Input sample obs: [{test_obs[0, 0].item():.4f}, {test_obs[0, 1].item():.4f}, ...]")
+    print(f"   Output action logits (top 5): {pt_logits[:5]}")
+    print(f"   Argmax Action: {np.argmax(pt_logits)}")
+    print("\n==================================================")
+    print("✓ ONNX EXPORT & WEIGHT SYNCHRONIZATION COMPLETE")
+    print("==================================================")
 
 
 if __name__ == "__main__":
-    checkpoint = (
-        "training/models/mappo_real_verified_run.pt"
-        if os.path.exists("training/models/mappo_real_verified_run.pt")
-        else "training/models/mappo_academy_3_vs_1_with_keeper_smoke.pt"
+    parser = argparse.ArgumentParser(description="Export MAPPO checkpoint to ONNX")
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default="training/models/mappo_academy_3_vs_1_with_keeper_trained.pt",
+        help="Path to PyTorch checkpoint",
     )
-    output = "public/models/mappo_policy.onnx"
-    export_to_onnx(checkpoint, output)
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="public/models/mappo_policy.onnx",
+        help="Output ONNX file path",
+    )
+    parser.add_argument(
+        "--ts-weights",
+        type=str,
+        default="src/agents/mappo_weights.ts",
+        help="Output TypeScript weights file path",
+    )
+    args = parser.parse_args()
+
+    export_to_onnx(
+        checkpoint_path=args.checkpoint,
+        output_path=args.output,
+        ts_weights_path=args.ts_weights,
+    )
