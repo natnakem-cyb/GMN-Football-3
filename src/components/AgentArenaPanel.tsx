@@ -8,6 +8,8 @@ interface AgentArenaPanelProps {
   onUpdateTeamLeft: (config: Partial<TeamConfig>) => void;
   onUpdateTeamRight: (config: Partial<TeamConfig>) => void;
   onApplyPresetMatchup: (type: 'human_vs_ai' | 'ai_vs_ai' | 'neural_vs_rule') => void;
+  is3v1Scenario?: boolean;
+  isModelLoading?: boolean;
 }
 
 export const AgentArenaPanel: React.FC<AgentArenaPanelProps> = ({
@@ -16,6 +18,8 @@ export const AgentArenaPanel: React.FC<AgentArenaPanelProps> = ({
   onUpdateTeamLeft,
   onUpdateTeamRight,
   onApplyPresetMatchup,
+  is3v1Scenario = false,
+  isModelLoading = false,
 }) => {
   const formations: FormationType[] = ['4-3-3', '4-4-2', '3-5-2', '5-3-2', '1-2-1'];
 
@@ -77,7 +81,16 @@ export const AgentArenaPanel: React.FC<AgentArenaPanelProps> = ({
               >
                 <option value="human">👤 Human Player (Keyboard / Touch)</option>
                 <option value="rule_based">🤖 Tactical Rule AI</option>
-                <option value="neural">🧠 PPO Neural Policy Agent</option>
+                {is3v1Scenario ? (
+                  <option value="neural">
+                    🧠 PPO Neural Policy Agent (Trained MAPPO)
+                  </option>
+                ) : (
+                  <option value="neural" disabled>
+                    🧠 PPO Neural Policy (Trained MAPPO — Only for Academy 3 vs 1)
+                  </option>
+                )}
+                <option value="heuristic">📊 Heuristic Bot (Untrained Baseline)</option>
                 <option value="scripted">📜 Scripted Scenario Bot</option>
               </select>
             </div>
@@ -137,7 +150,7 @@ export const AgentArenaPanel: React.FC<AgentArenaPanelProps> = ({
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 font-medium focus:ring-1 focus:ring-red-500"
               >
                 <option value="rule_based">🤖 Tactical Rule AI</option>
-                <option value="neural">🧠 PPO Neural Policy Agent</option>
+                <option value="heuristic">📊 Heuristic Bot (Untrained Baseline)</option>
                 <option value="human">👤 Human Player</option>
                 <option value="scripted">📜 Scripted Scenario Bot</option>
               </select>

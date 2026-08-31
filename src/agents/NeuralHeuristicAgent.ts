@@ -27,7 +27,7 @@ export class NeuralHeuristicAgent implements IAgent {
     w3: Array.from({ length: 6 }, () => Array.from({ length: 5 }, () => (Math.random() - 0.5) * 0.8)),
   };
 
-  constructor(id = 'neural_ppo_v1', name = 'PPO Policy (ONNX / MLP)') {
+  constructor(id = 'neural_heuristic_v1', name = 'Heuristic Bot (Untrained Baseline)') {
     this.id = id;
     this.name = name;
   }

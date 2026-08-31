@@ -1,4 +1,4 @@
-import { ActionType, AgentAction, Ball, Player, TeamSide } from '../types/football';
+import { ActionType, AgentAction, Ball, GameMode, Player, TeamSide } from '../types/football';
 
 export interface AgentDecisionContext {
   player: Player;
@@ -9,6 +9,7 @@ export interface AgentDecisionContext {
   teamSide: TeamSide;
   controlledPlayerId: string | null;
   matchTime: number;
+  gameMode?: GameMode;
   rng?: { next(): number };
 }
 

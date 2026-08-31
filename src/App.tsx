@@ -3,6 +3,7 @@ import { GameEngine } from './engine/GameEngine';
 import { HumanAgent } from './agents/HumanAgent';
 import { RuleBasedAgent } from './agents/RuleBasedAgent';
 import { NeuralHeuristicAgent } from './agents/NeuralHeuristicAgent';
+import { TrainedPolicyAgent } from './agents/TrainedPolicyAgent';
 import { ScriptedScenarioAgent } from './agents/ScriptedScenarioAgent';
 import { ActionType, AgentAction, FormationType, RLStepResult, ScenarioConfig, TeamConfig, Vector2D } from './types/football';
 import { ACADEMY_SCENARIOS } from './scenarios/ScenarioRegistry';
@@ -42,6 +43,7 @@ export default function App() {
   const ruleAgentLeftRef = useRef<RuleBasedAgent>(new RuleBasedAgent('rule_left', 'Rule AI Left', 'medium'));
   const ruleAgentRightRef = useRef<RuleBasedAgent>(new RuleBasedAgent('rule_right', 'Rule AI Right', 'medium'));
   const neuralAgentRef = useRef<NeuralHeuristicAgent>(new NeuralHeuristicAgent());
+  const trainedAgentRef = useRef<TrainedPolicyAgent | null>(null);
   const scriptedAgentRef = useRef<ScriptedScenarioAgent>(new ScriptedScenarioAgent());
 
   const [activeTab, setActiveTab] = useState<TabType>('arena');
@@ -51,6 +53,8 @@ export default function App() {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isReplayMode, setIsReplayMode] = useState(false);
   const [replayFrameIndex, setReplayFrameIndex] = useState(0);
+  const [isModelLoading, setIsModelLoading] = useState(true);
+  const [modelError, setModelError] = useState<string | null>(null);
 
   // Engine React State Bridge
   const [, setRenderTrigger] = useState(0);
@@ -58,9 +62,26 @@ export default function App() {
 
   const engine = engineRef.current;
 
-  // Cleanup on unmount
+  // Cleanup on unmount & Async Model Loading
   useEffect(() => {
+    let mounted = true;
+    TrainedPolicyAgent.create('/models/mappo_policy.onnx')
+      .then((agent) => {
+        if (mounted) {
+          trainedAgentRef.current = agent;
+          setIsModelLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error('[TrainedPolicyAgent] Failed to load ONNX policy model:', err);
+        if (mounted) {
+          setModelError(err?.message || 'Failed to load model');
+          setIsModelLoading(false);
+        }
+      });
+
     return () => {
+      mounted = false;
       humanAgentRef.current.destroy();
     };
   }, []);
@@ -85,6 +106,9 @@ export default function App() {
         while (accumulatedTime >= tickInterval && ticksRun < 10) {
           const actionMap = new Map<string, AgentAction>();
 
+          const leftPlayersCount = engine.players.filter((p) => p.team === 'left').length;
+          const is3v1Scenario = engine.activeScenario?.id === 'academy_3_vs_1_with_keeper' || leftPlayersCount === 3;
+
           // Gather decisions for each player
           engine.players.forEach((player) => {
             const isLeft = player.team === 'left';
@@ -101,6 +125,7 @@ export default function App() {
               teamSide: player.team,
               controlledPlayerId: engine.controlledPlayerId,
               matchTime: engine.matchTimeSeconds,
+              gameMode: engine.gameMode,
             };
 
             let action: AgentAction = { type: ActionType.IDLE };
@@ -108,6 +133,12 @@ export default function App() {
             if (isLeft && teamConfig.controller === 'human' && player.id === engine.controlledPlayerId) {
               action = humanAgentRef.current.decide(context);
             } else if (teamConfig.controller === 'neural') {
+              if (isLeft && trainedAgentRef.current && is3v1Scenario) {
+                action = trainedAgentRef.current.decide(context);
+              } else {
+                action = neuralAgentRef.current.decide(context);
+              }
+            } else if (teamConfig.controller === 'heuristic') {
               action = neuralAgentRef.current.decide(context);
             } else if (teamConfig.controller === 'scripted') {
               action = scriptedAgentRef.current.decide(context);
@@ -140,9 +171,12 @@ export default function App() {
   // Handle Manual Step
   const handleStep = useCallback(() => {
     const actionMap = new Map<string, AgentAction>();
+    const leftPlayersCount = engine.players.filter((p) => p.team === 'left').length;
+    const is3v1Scenario = engine.activeScenario?.id === 'academy_3_vs_1_with_keeper' || leftPlayersCount === 3;
+
     engine.players.forEach((player) => {
       const isLeft = player.team === 'left';
-      const ruleAgent = isLeft ? ruleAgentLeftRef.current : ruleAgentRightRef.current;
+      const teamConfig = isLeft ? engine.teamLeftConfig : engine.teamRightConfig;
       const context = {
         player,
         teammates: engine.players.filter((p) => p.team === player.team),
@@ -152,8 +186,27 @@ export default function App() {
         teamSide: player.team,
         controlledPlayerId: engine.controlledPlayerId,
         matchTime: engine.matchTimeSeconds,
+        gameMode: engine.gameMode,
       };
-      actionMap.set(player.id, ruleAgent.decide(context));
+
+      let action: AgentAction = { type: ActionType.IDLE };
+      if (isLeft && teamConfig.controller === 'human' && player.id === engine.controlledPlayerId) {
+        action = humanAgentRef.current.decide(context);
+      } else if (teamConfig.controller === 'neural') {
+        if (isLeft && trainedAgentRef.current && is3v1Scenario) {
+          action = trainedAgentRef.current.decide(context);
+        } else {
+          action = neuralAgentRef.current.decide(context);
+        }
+      } else if (teamConfig.controller === 'heuristic') {
+        action = neuralAgentRef.current.decide(context);
+      } else if (teamConfig.controller === 'scripted') {
+        action = scriptedAgentRef.current.decide(context);
+      } else {
+        const ruleAgent = isLeft ? ruleAgentLeftRef.current : ruleAgentRightRef.current;
+        action = ruleAgent.decide(context);
+      }
+      actionMap.set(player.id, action);
     });
 
     const res = engine.step(actionMap, 1 / 60);
@@ -189,6 +242,11 @@ export default function App() {
   // Scenario Loader
   const handleSelectScenario = (scenario: ScenarioConfig) => {
     engine.loadScenario(scenario);
+    if (scenario.id === 'academy_3_vs_1_with_keeper') {
+      engine.teamLeftConfig.controller = 'neural';
+    } else if (engine.teamLeftConfig.controller === 'neural') {
+      engine.teamLeftConfig.controller = 'human';
+    }
     setIsPlaying(true);
     setIsReplayMode(false);
     setActiveTab('arena');
@@ -198,6 +256,9 @@ export default function App() {
   // Free play
   const handleFreePlay = () => {
     engine.initDefaultMatch('4-3-3', '4-3-3', 11);
+    if (engine.teamLeftConfig.controller === 'neural') {
+      engine.teamLeftConfig.controller = 'human';
+    }
     setIsPlaying(true);
     setIsReplayMode(false);
     setActiveTab('arena');
@@ -427,6 +488,8 @@ export default function App() {
           <AgentArenaPanel
             teamLeft={engine.teamLeftConfig}
             teamRight={engine.teamRightConfig}
+            is3v1Scenario={engine.activeScenario?.id === 'academy_3_vs_1_with_keeper' || engine.players.filter((p) => p.team === 'left').length === 3}
+            isModelLoading={isModelLoading}
             onUpdateTeamLeft={(cfg) => {
               Object.assign(engine.teamLeftConfig, cfg);
               if (cfg.formation) {

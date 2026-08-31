@@ -91,7 +91,7 @@ export interface TeamConfig {
   accentColor: string;
   textColor: string;
   formation: FormationType;
-  controller: 'human' | 'rule_based' | 'neural' | 'scripted';
+  controller: 'human' | 'rule_based' | 'neural' | 'scripted' | 'heuristic';
   aiDifficulty: 'easy' | 'medium' | 'hard' | 'master';
   tactics: {
     aggression: number; // 0..1
