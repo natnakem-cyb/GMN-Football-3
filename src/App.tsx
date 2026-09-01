@@ -524,6 +524,14 @@ export default function App() {
             currentFrameIndex={replayFrameIndex}
             onSeekFrame={setReplayFrameIndex}
             isReplayMode={isReplayMode}
+            scenarioName={engine.activeScenario?.id || 'academy_3_vs_1_with_keeper'}
+            onImportTrace={(importedFrames, importedEvents) => {
+              engine.replayBuffer = importedFrames;
+              engine.events = importedEvents;
+              setReplayFrameIndex(0);
+              setIsReplayMode(true);
+              setRenderTrigger((prev) => prev + 1);
+            }}
             onToggleReplayMode={(active) => {
               setIsReplayMode(active);
               if (!active) {

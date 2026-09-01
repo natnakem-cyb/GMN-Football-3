@@ -72,9 +72,10 @@ def ppo_update(
     old_logprobs_t = torch.from_numpy(flat_old_logprobs).float()
     advantages_t = torch.from_numpy(flat_advantages).float()
     returns_t = torch.from_numpy(flat_returns).float()
-    global_state_t = torch.from_numpy(
-        np.repeat(buffer["global_state"], num_agents, axis=0)
-    ).float()
+    
+    # 3D joint observations for scalable permutation-invariant critic (Deep Sets)
+    joint_obs_repeated = np.repeat(buffer["local_obs"], num_agents, axis=0)
+    joint_obs_t = torch.from_numpy(joint_obs_repeated).float()
 
     n_samples = T * num_agents
     metrics = {"policy_loss": [], "value_loss": [], "entropy": [], "approx_kl": []}
@@ -93,7 +94,8 @@ def ppo_update(
             surr2 = torch.clamp(ratio, 1.0 - clip_range, 1.0 + clip_range) * advantages_t[batch_idx]
             policy_loss = -torch.min(surr1, surr2).mean()
 
-            values_pred = critic(global_state_t[batch_idx])
+            # Pass 3D tensor (batch_size, num_agents, obs_dim) to CentralizedCritic
+            values_pred = critic(joint_obs_t[batch_idx])
             value_loss = ((values_pred - returns_t[batch_idx]) ** 2).mean()
 
             loss = policy_loss + value_coef * value_loss - entropy_coef * entropy

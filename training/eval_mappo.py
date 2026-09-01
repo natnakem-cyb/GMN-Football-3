@@ -37,9 +37,10 @@ def evaluate_mappo(
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint not found at: {checkpoint_path}")
 
-    # Load model
+    # Load model with dynamic obs_dim compatibility
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    actor = SharedActor(obs_dim=115, action_dim=19, hidden=64)
+    inferred_obs_dim = checkpoint["actor"]["net.0.weight"].shape[1] if "net.0.weight" in checkpoint["actor"] else 127
+    actor = SharedActor(obs_dim=inferred_obs_dim, action_dim=19, hidden=64)
     actor.load_state_dict(checkpoint["actor"])
     actor.eval()
 

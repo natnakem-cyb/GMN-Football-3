@@ -11,7 +11,7 @@ export interface Vector3D {
 
 export type TeamSide = 'left' | 'right';
 
-export type PlayerRole = 'GK' | 'CB' | 'LB' | 'RB' | 'CM' | 'LM' | 'RM' | 'CAM' | 'ST' | 'LW' | 'RW';
+export type PlayerRole = 'GK' | 'CB' | 'LB' | 'RB' | 'CDM' | 'CM' | 'LM' | 'RM' | 'CAM' | 'ST' | 'LW' | 'RW';
 
 export interface PlayerStats {
   speed: number;

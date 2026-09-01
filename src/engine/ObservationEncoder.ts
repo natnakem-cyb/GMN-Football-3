@@ -1,14 +1,20 @@
 import { Ball, GameMode, MatchScore, Player, RLObservation, TeamSide } from '../types/football';
 import { PITCH } from './Rules';
 import { Vec2 } from './Vector';
-import { OBSERVATION_DIM, OBSERVATION_SCHEMA_VERSION } from './Contract';
+import {
+  OBSERVATION_DIM,
+  OBSERVATION_SCHEMA_VERSION,
+  BASE_OBSERVATION_DIM,
+  ROLE_DIM,
+  ROLE_VOCABULARY,
+} from './Contract';
 
-export { OBSERVATION_DIM, OBSERVATION_SCHEMA_VERSION };
+export { OBSERVATION_DIM, OBSERVATION_SCHEMA_VERSION, BASE_OBSERVATION_DIM, ROLE_DIM };
 
 export class ObservationEncoder {
   /**
-   * Generates a Google Research Football compatible SMM / Feature vector observation.
-   * Standard GRF simple115_v2 layout (115 floats):
+   * Generates a Google Research Football compatible SMM / Feature vector observation
+   * with role differentiation (127 floats total):
    * - Offset 0 (len 22): Left team player (x, y) positions, 11 players
    * - Offset 22 (len 22): Left team player (x, y) movement direction
    * - Offset 44 (len 22): Right team player (x, y) positions
@@ -18,7 +24,9 @@ export class ObservationEncoder {
    * - Offset 94 (len 3): Ball ownership, one-hot: [no-one, left, right]
    * - Offset 97 (len 11): Active player, one-hot over 11 players
    * - Offset 108 (len 7): game_mode, one-hot: [Normal, KickOff, GoalKick, FreeKick, Corner, ThrowIn, Penalty]
-   * Total: 115 floats. Inactive player slots (fewer than 11 on a side) are set to -1.
+   * - Offset 115 (len 12): Agent's assigned role one-hot over ROLE_VOCABULARY:
+   *   [GK, CB, LB, RB, CDM, CM, LM, RM, LW, RW, CAM, ST]
+   * Total: 127 floats. Inactive player slots are set to -1.
    */
   static encode(
     players: Player[],
@@ -126,6 +134,13 @@ export class ObservationEncoder {
     ];
     for (const mode of modeIndices) {
       rawVector.push(gameMode === mode ? 1.0 : 0.0);
+    }
+
+    // 115..126 (Length 12): Active Agent Role One-Hot over ROLE_VOCABULARY
+    const activePlayer = activePlayerId ? players.find((p) => p.id === activePlayerId) : leftPlayers[0];
+    const role = activePlayer?.role;
+    for (let r = 0; r < ROLE_VOCABULARY.length; r++) {
+      rawVector.push(role === ROLE_VOCABULARY[r] ? 1.0 : 0.0);
     }
 
     if (rawVector.length !== OBSERVATION_DIM) {

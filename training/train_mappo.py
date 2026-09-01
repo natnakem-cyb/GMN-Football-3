@@ -70,15 +70,16 @@ def run_mappo_training(
     print("\n1. Initializing Multi-Agent Environment & MAPPO Networks...")
     env = GMNMultiAgentEnv(scenario=scenario, auto_start_bridge=True)
     num_agents = len(env.possible_agents)
-    obs_dim = 115
+    obs_dim = OBSERVATION_DIM
     global_state_dim = obs_dim * num_agents
-    action_dim = 19
+    action_dim = ACTION_SPACE_SIZE
 
     print(f"   Controllable Agents ({num_agents}): {env.possible_agents}")
-    print(f"   Local Obs Dim: {obs_dim} | Global State Dim: {global_state_dim} | Action Dim: {action_dim}")
+    print(f"   Local Obs Dim (with Role One-Hot): {obs_dim} | Action Dim: {action_dim}")
+    print(f"   Critic Architecture: Permutation-Invariant Deep Sets Pooling (O(1) parameter scaling)")
 
     actor = SharedActor(obs_dim=obs_dim, action_dim=action_dim, hidden=64)
-    critic = CentralizedCritic(global_state_dim=global_state_dim, obs_dim=obs_dim, hidden=64)
+    critic = CentralizedCritic(obs_dim=obs_dim, hidden=64, global_state_dim=global_state_dim)
 
     actor_opt = torch.optim.Adam(actor.parameters(), lr=3e-4)
     critic_opt = torch.optim.Adam(critic.parameters(), lr=3e-4)

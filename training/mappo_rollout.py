@@ -3,7 +3,7 @@ GMN-Football-3 — MAPPO Rollout Collection & Generalized Advantage Estimation (
 Data pipeline for Multi-Agent PPO with Centralized Critic.
 
 Collects trajectory buffers with local observations for shared actors and
-concatenated joint observations for the centralized critic.
+joint observations for the centralized critic.
 """
 
 from typing import Dict, Tuple, Any
@@ -23,8 +23,8 @@ def collect_rollout(
     Collects a multi-agent rollout from the PettingZoo environment.
 
     Returns a dict of numpy arrays with explicit shapes:
-    - local_obs: shape (num_steps, num_agents, 115) float32
-    - global_state: shape (num_steps, 345) float32
+    - local_obs: shape (num_steps, num_agents, obs_dim) float32
+    - global_state: shape (num_steps, obs_dim * num_agents) float32
     - actions: shape (num_steps, num_agents) int64
     - logprobs: shape (num_steps, num_agents) float32
     - values: shape (num_steps,) float32
@@ -33,8 +33,8 @@ def collect_rollout(
     - completed_episodes: list of dicts with {"reward": float, "length": int, "goal": int}
     """
     buffer: Dict[str, list] = {
-        "local_obs": [],      # per-agent, shape (num_steps, num_agents, 115)
-        "global_state": [],   # shape (num_steps, 345)
+        "local_obs": [],      # per-agent, shape (num_steps, num_agents, obs_dim)
+        "global_state": [],   # shape (num_steps, obs_dim * num_agents)
         "actions": [],        # shape (num_steps, num_agents)
         "logprobs": [],       # shape (num_steps, num_agents)
         "values": [],         # shape (num_steps,) — one shared value per step
@@ -54,6 +54,8 @@ def collect_rollout(
 
     agent_order = list(env.agents if env.agents else env.possible_agents)
     num_agents = len(agent_order)
+    first_obs = obs_dict[agent_order[0]]
+    obs_dim = first_obs.shape[0] if hasattr(first_obs, "shape") else len(first_obs)
 
     for _ in range(num_steps):
         current_agents = list(env.agents if env.agents else env.possible_agents)
@@ -62,17 +64,19 @@ def collect_rollout(
 
         # Verify concatenation integrity
         for idx, agent in enumerate(current_agents):
-            start = idx * 115
-            end = (idx + 1) * 115
+            start = idx * obs_dim
+            end = (idx + 1) * obs_dim
             assert np.array_equal(global_state[start:end], local_obs[idx]), (
                 f"Global state slice [{start}:{end}] does not match local_obs[{idx}] for agent {agent}"
             )
 
         with torch.no_grad():
-            dist = actor(torch.tensor(local_obs, dtype=torch.float32))
+            local_obs_t = torch.tensor(local_obs, dtype=torch.float32)
+            dist = actor(local_obs_t)
             actions = dist.sample()
             logprobs = dist.log_prob(actions)
-            value = critic(torch.tensor(global_state, dtype=torch.float32).unsqueeze(0))
+            # Pass 3D tensor (1, num_agents, obs_dim) to CentralizedCritic (Deep Sets pooling)
+            value = critic(local_obs_t.unsqueeze(0))
 
         action_dict = {a: int(actions[i].item()) for i, a in enumerate(current_agents)}
         obs_dict, rewards, terminations, truncations, infos = env.step(action_dict)
@@ -123,11 +127,11 @@ def collect_rollout(
     }
 
     # Explicit shape assertions
-    assert res_buffer["local_obs"].shape == (num_steps, num_agents, 115), (
-        f"local_obs shape mismatch: expected {(num_steps, num_agents, 115)}, got {res_buffer['local_obs'].shape}"
+    assert res_buffer["local_obs"].shape == (num_steps, num_agents, obs_dim), (
+        f"local_obs shape mismatch: expected {(num_steps, num_agents, obs_dim)}, got {res_buffer['local_obs'].shape}"
     )
-    assert res_buffer["global_state"].shape == (num_steps, 115 * num_agents), (
-        f"global_state shape mismatch: expected {(num_steps, 115 * num_agents)}, got {res_buffer['global_state'].shape}"
+    assert res_buffer["global_state"].shape == (num_steps, obs_dim * num_agents), (
+        f"global_state shape mismatch: expected {(num_steps, obs_dim * num_agents)}, got {res_buffer['global_state'].shape}"
     )
     assert res_buffer["actions"].shape == (num_steps, num_agents), (
         f"actions shape mismatch: expected {(num_steps, num_agents)}, got {res_buffer['actions'].shape}"

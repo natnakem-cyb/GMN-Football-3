@@ -3,11 +3,28 @@
  * Authoritative single source of truth for RL environments, bridges, and neural networks.
  */
 
-export const GMN_ENV_VERSION = '3.0.0';
-export const OBSERVATION_SCHEMA_VERSION = 'simple115_v2';
+export const GMN_ENV_VERSION = '3.1.0';
+export const OBSERVATION_SCHEMA_VERSION = 'simple115_v3_role';
 export const ACTION_SCHEMA_VERSION = 'discrete19_v1';
 
-export const OBSERVATION_DIM = 115;
+export const ROLE_VOCABULARY = [
+  'GK',
+  'CB',
+  'LB',
+  'RB',
+  'CDM',
+  'CM',
+  'LM',
+  'RM',
+  'LW',
+  'RW',
+  'CAM',
+  'ST',
+] as const;
+
+export const ROLE_DIM = 12;
+export const BASE_OBSERVATION_DIM = 115;
+export const OBSERVATION_DIM = BASE_OBSERVATION_DIM + ROLE_DIM; // 127
 export const ACTION_SPACE_SIZE = 19;
 
 export const EVENT_CODE_MAP = [

@@ -314,7 +314,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-// Binary step-response layout: 477 bytes total, all little-endian
+// Binary step-response layout: (17 + OBSERVATION_DIM * 4) bytes total (525B for 127-float obs), all little-endian
 // Offset 0 (4B float32): reward
 // Offset 4 (1B uint8): terminated (0/1)
 // Offset 5 (1B uint8): truncated (0/1)
@@ -323,9 +323,10 @@ const server = http.createServer((req, res) => {
 // Offset 8 (4B float32): checkpointReward
 // Offset 12 (4B float32): ballDistanceToGoal
 // Offset 16 (1B uint8): eventCode
-// Offset 17 (460B): 115 * float32 observation
+// Offset 17 (OBSERVATION_DIM * 4 B): OBSERVATION_DIM * float32 observation
 export function encodeStepBinary(stepResult: ReturnType<typeof bridge.step>): Buffer {
-  const buf = Buffer.allocUnsafe(477);
+  const obsBytes = OBSERVATION_DIM * 4;
+  const buf = Buffer.allocUnsafe(17 + obsBytes);
   buf.writeFloatLE(stepResult.reward || 0.0, 0);
   buf.writeUInt8(stepResult.terminated ? 1 : 0, 4);
   buf.writeUInt8(stepResult.truncated ? 1 : 0, 5);
@@ -346,7 +347,7 @@ export function encodeStepBinary(stepResult: ReturnType<typeof bridge.step>): Bu
   return buf;
 }
 
-// Multi-Agent Binary step-response layout: 17 + 460 * N bytes total, all little-endian
+// Multi-Agent Binary step-response layout: 17 + (OBSERVATION_DIM * 4) * N bytes total, all little-endian
 // Offset 0 (4B float32): reward (shared team reward)
 // Offset 4 (1B uint8): terminated (0/1)
 // Offset 5 (1B uint8): truncated (0/1)
@@ -355,10 +356,11 @@ export function encodeStepBinary(stepResult: ReturnType<typeof bridge.step>): Bu
 // Offset 8 (4B float32): checkpointReward
 // Offset 12 (4B float32): ballDistanceToGoal
 // Offset 16 (1B uint8): eventCode
-// Offset 17 (460 * N B): N observations, 115 * float32 each, in controllableAgentIds order
+// Offset 17 ((OBSERVATION_DIM * 4) * N B): N observations, OBSERVATION_DIM * float32 each, in controllableAgentIds order
 export function encodeMultiStepBinary(multiResult: ReturnType<typeof bridge.stepMulti>): Buffer {
   const N = multiResult.observations.length;
-  const buf = Buffer.allocUnsafe(17 + 460 * N);
+  const obsBytes = OBSERVATION_DIM * 4;
+  const buf = Buffer.allocUnsafe(17 + obsBytes * N);
   buf.writeFloatLE(multiResult.reward || 0.0, 0);
   buf.writeUInt8(multiResult.terminated ? 1 : 0, 4);
   buf.writeUInt8(multiResult.truncated ? 1 : 0, 5);
@@ -373,7 +375,7 @@ export function encodeMultiStepBinary(multiResult: ReturnType<typeof bridge.step
 
   for (let agentIdx = 0; agentIdx < N; agentIdx++) {
     const obs = multiResult.observations[agentIdx];
-    const baseOffset = 17 + agentIdx * 460;
+    const baseOffset = 17 + agentIdx * obsBytes;
     for (let i = 0; i < OBSERVATION_DIM; i++) {
       buf.writeFloatLE(obs[i] ?? 0.0, baseOffset + i * 4);
     }
@@ -425,7 +427,7 @@ wss.on('connection', (ws: WebSocket) => {
       try {
         if (isBinary) {
           // Send a zeroed-out binary frame with error sentinel so the client doesn't hang
-          const errBuf = Buffer.allocUnsafe(477);
+          const errBuf = Buffer.allocUnsafe(17 + OBSERVATION_DIM * 4);
           errBuf.fill(0);
           errBuf.writeFloatLE(-999.0, 0); // sentinel reward
           errBuf.writeUInt8(1, 4);        // terminated = true

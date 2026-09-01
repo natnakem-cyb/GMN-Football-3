@@ -26,11 +26,11 @@ from gymnasium import spaces
 from pettingzoo.utils.env import ParallelEnv
 
 # Centralized version & contract constants
-GMN_ENV_VERSION = "3.0.0"
-OBSERVATION_SCHEMA_VERSION = "simple115_v2"
+GMN_ENV_VERSION = "3.1.0"
+OBSERVATION_SCHEMA_VERSION = "simple115_v3_role"
 ACTION_SCHEMA_VERSION = "discrete19_v1"
 
-OBSERVATION_DIM = 115
+OBSERVATION_DIM = 127
 ACTION_SPACE_SIZE = 19
 
 EVENT_CODE_MAP = [
@@ -259,11 +259,12 @@ class GMNMultiAgentEnv(ParallelEnv):
         if not isinstance(data, (bytes, bytearray)):
             raise RuntimeError(f"[GMN-PettingZoo] Expected binary WebSocket frame, got {type(data)}")
 
-        expected_len = 17 + 460 * num_agents
+        obs_bytes = OBSERVATION_DIM * 4
+        expected_len = 17 + obs_bytes * num_agents
         if len(data) != expected_len:
             raise RuntimeError(
                 f"[GMN-PettingZoo Frame Length Error] Expected {expected_len} bytes "
-                f"(17B header + 460B * {num_agents} agents), but received {len(data)} bytes."
+                f"(17B header + {obs_bytes}B * {num_agents} agents), but received {len(data)} bytes."
             )
 
         # Unpack 17-byte header
@@ -293,7 +294,7 @@ class GMNMultiAgentEnv(ParallelEnv):
         infos: Dict[str, Any] = {}
 
         for i, agent in enumerate(self.agents):
-            offset = 17 + i * 460
+            offset = 17 + i * obs_bytes
             obs = np.frombuffer(data, dtype="<f4", count=OBSERVATION_DIM, offset=offset).copy()
             observations[agent] = obs
             rewards[agent] = shared_reward

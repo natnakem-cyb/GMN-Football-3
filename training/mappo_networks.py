@@ -14,8 +14,10 @@ from torch.distributions import Categorical
 
 
 class SharedActor(nn.Module):
-    def __init__(self, obs_dim: int = 115, action_dim: int = 19, hidden: int = 64):
+    def __init__(self, obs_dim: int = 127, action_dim: int = 19, hidden: int = 64):
         super().__init__()
+        self.obs_dim = obs_dim
+        self.action_dim = action_dim
         self.net = nn.Sequential(
             nn.Linear(obs_dim, hidden),
             nn.Tanh(),
@@ -31,30 +33,21 @@ class SharedActor(nn.Module):
 
 class CentralizedCritic(nn.Module):
     """
-    Scalable Permutation-Invariant Centralized Critic.
-    Supports both fixed concatenated global states and dynamic variable-agent pooling representations.
+    Scalable Permutation-Invariant Centralized Critic (Deep Sets Architecture).
+    Supports variable agent counts (3v1, 5v5, 11v11) with constant parameter count O(1).
     
     Architecture:
-    1. Direct Flat Mode: Standard MLP mapping fixed-dimension concatenated agent observations to team value.
-    2. Deep Sets Pooling Mode: Permutation-invariant agent encoder + dual (mean, max) pooling head that
-       scales seamlessly across arbitrary team sizes (3v1, 5v5, 11v11) without parameter explosion.
+    1. Agent Encoder: MLP mapping each agent's observation vector (obs_dim=127) -> hidden representation (64).
+    2. Deep Sets Pooling: Permutation-invariant dual (mean + max) pooling over agents -> (128).
+    3. Joint Value Head: MLP mapping pooled representation -> scalar team state-value V(s).
     """
-    def __init__(self, global_state_dim: int = 345, obs_dim: int = 115, hidden: int = 64):
+    def __init__(self, obs_dim: int = 127, hidden: int = 64, global_state_dim: int = None):
         super().__init__()
-        self.global_state_dim = global_state_dim
         self.obs_dim = obs_dim
         self.hidden = hidden
+        self.global_state_dim = global_state_dim or (obs_dim * 3)
 
-        # Flat MLP net (direct SB3 parity & backward compatibility)
-        self.flat_net = nn.Sequential(
-            nn.Linear(global_state_dim, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, 1),
-        )
-
-        # Scalable permutation-invariant set aggregation architecture
+        # Scalable permutation-invariant set aggregation architecture (default)
         self.agent_encoder = nn.Sequential(
             nn.Linear(obs_dim, hidden),
             nn.Tanh(),
@@ -67,27 +60,38 @@ class CentralizedCritic(nn.Module):
             nn.Linear(hidden, 1),
         )
 
-    def forward(self, global_state: torch.Tensor) -> torch.Tensor:
-        # If 3D tensor (batch, num_agents, obs_dim) -> use invariant pooling
-        if global_state.dim() == 3:
-            emb = self.agent_encoder(global_state)
+        # Legacy flat MLP net (retained for backward compatibility)
+        self.flat_net = nn.Sequential(
+            nn.Linear(self.global_state_dim, hidden),
+            nn.Tanh(),
+            nn.Linear(hidden, hidden),
+            nn.Tanh(),
+            nn.Linear(hidden, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass. Accepts:
+        - 3D tensor of shape (batch, num_agents, obs_dim) -> runs Deep Sets invariant pooling
+        - 2D tensor of shape (batch, num_agents * obs_dim) -> reshapes and runs invariant pooling
+        - 2D tensor of shape (batch, global_state_dim) -> fallback to flat net if pooling shape differs
+        """
+        if x.dim() == 3:
+            emb = self.agent_encoder(x)
             mean_pool = emb.mean(dim=1)
             max_pool = emb.max(dim=1)[0]
             joint = torch.cat([mean_pool, max_pool], dim=-1)
             return self.pooled_value_head(joint).squeeze(-1)
 
-        # If 2D tensor matching exact flat dimension
-        if global_state.shape[-1] == self.global_state_dim:
-            return self.flat_net(global_state).squeeze(-1)
-
-        # If 2D tensor of arbitrary size divisible by obs_dim, reshape and pool
-        if global_state.shape[-1] % self.obs_dim == 0:
-            b = global_state.shape[0]
-            reshaped = global_state.view(b, -1, self.obs_dim)
+        # If 2D tensor divisible by obs_dim, reshape to (batch, num_agents, obs_dim) and use invariant pooling
+        if x.dim() == 2 and x.shape[-1] % self.obs_dim == 0:
+            b = x.shape[0]
+            reshaped = x.view(b, -1, self.obs_dim)
             emb = self.agent_encoder(reshaped)
             mean_pool = emb.mean(dim=1)
             max_pool = emb.max(dim=1)[0]
             joint = torch.cat([mean_pool, max_pool], dim=-1)
             return self.pooled_value_head(joint).squeeze(-1)
 
-        return self.flat_net(global_state).squeeze(-1)
+        # Fallback to flat net
+        return self.flat_net(x).squeeze(-1)

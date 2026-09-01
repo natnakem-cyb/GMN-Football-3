@@ -10,9 +10,9 @@ import gymnasium as gym
 from gymnasium import spaces
 from typing import Optional, Tuple, Dict, Any
 
-OBSERVATION_DIM = 115
+OBSERVATION_DIM = 127
 ACTION_SPACE_SIZE = 19
-GMN_ENV_VERSION = "3.0.0"
+GMN_ENV_VERSION = "3.1.0"
 
 EVENT_CODE_MAP = [
     None,
@@ -190,14 +190,15 @@ class GMNFootballEnv(gym.Env):
 
             self.ws_client.send(int(action).to_bytes(1, "little"))
             data = self.ws_client.recv()
-            if not isinstance(data, (bytes, bytearray)) or len(data) != 477:
+            expected_frame_len = 17 + OBSERVATION_DIM * 4
+            if not isinstance(data, (bytes, bytearray)) or len(data) != expected_frame_len:
                 raise RuntimeError(
-                    f"[GMN-Gym WS Error] Expected 477 binary bytes, got "
+                    f"[GMN-Gym WS Error] Expected {expected_frame_len} binary bytes, got "
                     f"{len(data) if isinstance(data, (bytes, bytearray)) else type(data)}"
                 )
 
             reward, term, trunc, score_l, score_r, cp_reward, dist_goal, event_code = struct.unpack_from("<f??BBffB", data, 0)
-            raw_obs = np.frombuffer(data, dtype="<f4", count=115, offset=17).copy()
+            raw_obs = np.frombuffer(data, dtype="<f4", count=OBSERVATION_DIM, offset=17).copy()
 
             info: Dict[str, Any] = {
                 "score": {"left": int(score_l), "right": int(score_r)},

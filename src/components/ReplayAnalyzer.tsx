@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { MatchEvent, ReplayFrame } from '../types/football';
-import { Film, Play, Pause, SkipBack, SkipForward, Bookmark, FastForward } from 'lucide-react';
+import { Film, SkipBack, SkipForward, Bookmark, Download, Upload, CheckCircle, AlertCircle, FileText } from 'lucide-react';
+import { exportReplayToJsonl, parseJsonlTrace, TraceMetadata } from '../utils/replaySerializer';
 
 interface ReplayAnalyzerProps {
   replayFrames: ReplayFrame[];
@@ -9,6 +10,8 @@ interface ReplayAnalyzerProps {
   onSeekFrame: (index: number) => void;
   isReplayMode: boolean;
   onToggleReplayMode: (active: boolean) => void;
+  scenarioName?: string;
+  onImportTrace?: (frames: ReplayFrame[], events: MatchEvent[], metadata: TraceMetadata) => void;
 }
 
 export const ReplayAnalyzer: React.FC<ReplayAnalyzerProps> = ({
@@ -18,19 +21,68 @@ export const ReplayAnalyzer: React.FC<ReplayAnalyzerProps> = ({
   onSeekFrame,
   isReplayMode,
   onToggleReplayMode,
+  scenarioName = 'academy_3_vs_1_with_keeper',
+  onImportTrace,
 }) => {
-  const [isPlayingReplay, setIsPlayingReplay] = useState(false);
+  const [importStatus, setImportStatus] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const [importedMeta, setImportedMeta] = useState<TraceMetadata | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const totalFrames = replayFrames.length;
   const currentFrame = replayFrames[currentFrameIndex] || replayFrames[totalFrames - 1];
 
   const handleBookmarkClick = (event: MatchEvent) => {
-    // Find closest frame to event time
     const targetIdx = replayFrames.findIndex(
       (f) => Math.abs(f.matchTimeSeconds - event.timeSeconds) < 0.1
     );
     if (targetIdx !== -1) {
       onSeekFrame(targetIdx);
     }
+  };
+
+  const handleExportJsonl = () => {
+    if (replayFrames.length === 0) return;
+    const jsonlContent = exportReplayToJsonl(replayFrames, events, scenarioName);
+    const blob = new Blob([jsonlContent], { type: 'application/x-ndjson;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    link.href = url;
+    link.download = `replay_${scenarioName}_${timestamp}.jsonl`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const text = evt.target?.result as string;
+        const { metadata, frames, events: parsedEvents } = parseJsonlTrace(text);
+        setImportedMeta(metadata);
+        setImportStatus({
+          msg: `Successfully imported ${frames.length} frames from ${file.name} (Scenario: ${metadata.scenario})`,
+          type: 'success',
+        });
+        if (onImportTrace) {
+          onImportTrace(frames, parsedEvents, metadata);
+        }
+        if (!isReplayMode) {
+          onToggleReplayMode(true);
+        }
+      } catch (err: any) {
+        setImportStatus({
+          msg: `Failed to parse trace file: ${err.message || 'Invalid JSONL format'}`,
+          type: 'error',
+        });
+      }
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -41,25 +93,85 @@ export const ReplayAnalyzer: React.FC<ReplayAnalyzerProps> = ({
             <Film className="w-5 h-5 text-emerald-400" /> Match Replay & Frame-by-Frame Analyzer
           </h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Deterministic state timeline scrubber with key event bookmarks and player telemetry.
+            Deterministic state timeline scrubber with JSONL trace import/export, key event bookmarks, and telemetry.
           </p>
         </div>
 
-        <button
-          onClick={() => onToggleReplayMode(!isReplayMode)}
-          className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-            isReplayMode
-              ? 'bg-amber-600 text-white border-amber-500 shadow-md'
-              : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Export JSONL Button */}
+          <button
+            onClick={handleExportJsonl}
+            disabled={totalFrames === 0}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 transition-all shadow-sm"
+            title="Export full replay trace to .jsonl file"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-400" />
+            Export Trace (.jsonl)
+          </button>
+
+          {/* Import JSONL Button */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            accept=".jsonl,.json"
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 flex items-center gap-1.5 transition-all shadow-sm"
+            title="Import an RL episode trace or match replay"
+          >
+            <Upload className="w-3.5 h-3.5 text-cyan-400" />
+            Import Trace (.jsonl)
+          </button>
+
+          {/* Toggle Replay Mode */}
+          <button
+            onClick={() => onToggleReplayMode(!isReplayMode)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
+              isReplayMode
+                ? 'bg-amber-600 text-white border-amber-500 shadow-md'
+                : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+            }`}
+          >
+            {isReplayMode ? '🔴 Exit Replay Studio' : '🎬 Enter Replay Studio'}
+          </button>
+        </div>
+      </div>
+
+      {importStatus && (
+        <div
+          className={`mb-4 p-3 rounded-xl border text-xs flex items-center gap-2 ${
+            importStatus.type === 'success'
+              ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+              : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
           }`}
         >
-          {isReplayMode ? '🔴 Exit Replay Studio' : '🎬 Enter Replay Studio'}
-        </button>
-      </div>
+          {importStatus.type === 'success' ? (
+            <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+          ) : (
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+          )}
+          <span>{importStatus.msg}</span>
+        </div>
+      )}
+
+      {importedMeta && (
+        <div className="mb-4 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 flex flex-wrap items-center gap-4">
+          <span className="flex items-center gap-1 text-slate-300">
+            <FileText className="w-3.5 h-3.5 text-cyan-400" />
+            <strong>Trace Meta:</strong> {importedMeta.scenario}
+          </span>
+          {importedMeta.seed !== null && <span>Seed: {importedMeta.seed}</span>}
+          {importedMeta.checkpoint && <span>Checkpoint: {importedMeta.checkpoint}</span>}
+          <span>Recorded: {new Date(importedMeta.recorded_at).toLocaleString()}</span>
+        </div>
+      )}
 
       {totalFrames === 0 ? (
         <div className="text-center py-8 text-slate-500 text-xs">
-          No replay frames recorded yet. Start simulation to record frames.
+          No replay frames recorded yet. Start simulation or import a .jsonl trace to analyze frames.
         </div>
       ) : (
         <div className="space-y-4">
