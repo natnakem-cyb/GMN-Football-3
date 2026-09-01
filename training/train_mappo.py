@@ -90,6 +90,13 @@ def run_mappo_training(
     if resume_path and os.path.exists(resume_path):
         print(f"\n   -> Loading checkpoint state from: {resume_path}...")
         ckpt = torch.load(resume_path, map_location="cpu")
+        ckpt_obs_dim = ckpt.get("obs_dim", 115 if "actor" in ckpt and ckpt["actor"]["net.0.weight"].shape[1] == 115 else OBSERVATION_DIM)
+        if ckpt_obs_dim != OBSERVATION_DIM:
+            raise RuntimeError(
+                f"[GMN Contract Mismatch] Checkpoint '{resume_path}' has obs_dim={ckpt_obs_dim}, "
+                f"which is incompatible with current environment OBSERVATION_DIM={OBSERVATION_DIM} (simple115_v3_role). "
+                f"Pre-migration 115-dim checkpoints cannot be loaded; please re-train or re-export."
+            )
         if "actor" in ckpt:
             actor.load_state_dict(ckpt["actor"])
         if "critic" in ckpt:

@@ -141,8 +141,16 @@ def run_generalization_suite(
 
     # Inspect checkpoint
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    obs_dim = checkpoint.get("obs_dim", 115)
+    obs_dim = checkpoint.get("obs_dim", 115 if "actor" in checkpoint and checkpoint["actor"]["net.0.weight"].shape[1] == 115 else OBSERVATION_DIM)
     action_dim = checkpoint.get("action_dim", 19)
+
+    if obs_dim != OBSERVATION_DIM:
+        raise RuntimeError(
+            f"[GMN Contract Mismatch] Checkpoint '{checkpoint_path}' has obs_dim={obs_dim}, "
+            f"which is incompatible with current environment OBSERVATION_DIM={OBSERVATION_DIM} (simple115_v3_role). "
+            f"Pre-migration 115-dim checkpoints cannot be loaded; please re-train or re-export."
+        )
+
     actor = SharedActor(obs_dim=obs_dim, action_dim=action_dim, hidden=64)
     actor.load_state_dict(checkpoint["actor"])
     actor.eval()

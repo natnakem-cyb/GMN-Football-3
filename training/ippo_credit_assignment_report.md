@@ -55,7 +55,7 @@ $$\delta_{\text{MAPPO}}^t = r_{\text{team}}^t + \gamma V_{\text{joint}}(s^{t+1})
 | **Pass / Assist Credit Attribution** | Delayed & attenuated over $\Delta t$ steps | Instantaneous advantage spike via $V(s)$ shift |
 | **Lazy Agent Vulnerability** | High (agents easily collapse to passive roles) | Low (cooperative actions correctly rewarded) |
 | **Scalability across 3v1, 5v5, 11v11** | $O(1)$ network size, but high sample complexity | $O(1)$ parameter scaling via Deep Sets pooling |
-| **Convergence Speed (3v1 Goal Rate)** | ~400k–600k steps | ~150k–250k steps |
+| **Measured Goal Rate / Convergence** | UNMEASURED (requires local environment run) | UNMEASURED (requires local environment run) |
 
 ---
 

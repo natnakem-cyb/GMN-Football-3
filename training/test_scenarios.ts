@@ -1,6 +1,7 @@
 import { GameEngine } from '../src/engine/GameEngine';
 import { ACADEMY_SCENARIOS } from '../src/scenarios/ScenarioRegistry';
 import { OBSERVATION_DIM, ACTION_SPACE_SIZE } from '../src/engine/Contract';
+import { ObservationEncoder } from '../src/engine/ObservationEncoder';
 import { mapDiscreteAction } from './action_mapping';
 import { AgentAction } from '../src/types/football';
 
@@ -66,6 +67,33 @@ for (const scenario of ACADEMY_SCENARIOS) {
     }
 
     console.log(`  ✓ Successfully verified setup, observations, and stepping for ${scenario.id}`);
+
+    // 4. Per-agent role differentiation check for multi-agent scenarios
+    const leftAgents = engine.players.filter((p) => p.team === 'left');
+    if (leftAgents.length > 1) {
+      const distinctRoles = new Set(leftAgents.map((p) => p.role));
+      if (distinctRoles.size > 1) {
+        const agentObsSlices = leftAgents.map((p) => {
+          const obs = ObservationEncoder.encode(
+            engine.players,
+            engine.ball,
+            p.id,
+            engine.score,
+            engine.tickCount,
+            3600,
+            engine.gameMode
+          );
+          return obs.rawVector.slice(115, 127);
+        });
+        // Check that not all role slices are identical
+        const firstSliceStr = JSON.stringify(agentObsSlices[0]);
+        const hasDivergence = agentObsSlices.some((sl) => JSON.stringify(sl) !== firstSliceStr);
+        if (!hasDivergence) {
+          throw new Error(`Role slices failed to differentiate across agents with distinct roles in ${scenario.id}`);
+        }
+      }
+    }
+
     passedTests++;
   } catch (err: any) {
     console.error(`  ✗ FAILED scenario ${scenario.id}:`, err.message);

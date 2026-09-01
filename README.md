@@ -518,9 +518,22 @@ This moves the simulation toward a rule-bearing football state machine.
 ## Canonical Shape
 
 ```text
-(115,)
+(127,)
 dtype = float32
 ```
+
+> **Breaking Change (115 → 127 Migration):**  
+> In GMN v3.1.0 (`simple115_v3_role`), the observation vector was extended by 12 floats (`115..126`) representing the agent's self-role one-hot vector across `ROLE_VOCABULARY` (GK, CB, LB, RB, CDM, CM, LM, RM, LW, RW, CAM, ST).  
+> Checkpoints trained on the legacy 115-dim observation space are incompatible and will raise a descriptive runtime error if loaded without re-training.  
+> **Commands to re-train and re-export:**
+> ```bash
+> # Start bridge server
+> npx tsx training/bridge_server.ts
+> # Run MAPPO training (Python)
+> python3 training/train_mappo.py --scenario academy_3_vs_1_with_keeper --timesteps 50000
+> # Export ONNX & browser weights
+> python3 training/export_onnx.py --checkpoint training/models/mappo_academy_3_vs_1_with_keeper_trained.pt
+> ```
 
 The Gymnasium environment exposes:
 
@@ -528,7 +541,7 @@ The Gymnasium environment exposes:
 spaces.Box(
     low=-5.0,
     high=5.0,
-    shape=(115,),
+    shape=(127,),
     dtype=np.float32,
 )
 ```
@@ -544,8 +557,9 @@ spaces.Box(
 | `88..90` | 3 | Ball position `(x,y,z)` |
 | `91..93` | 3 | Ball velocity `(dx,dy,dz)` |
 | `94..96` | 3 | Possession one-hot |
-| `97..107` | 11 | Active controlled player one-hot |
+| `97..107` | 11 | Viewpoint / Active controlled player one-hot |
 | `108..114` | 7 | Match-mode one-hot |
+| `115..126` | 12 | Agent self-role one-hot (`ROLE_VOCABULARY`) |
 
 Unused player slots are represented according to the current observation encoder.
 
@@ -590,11 +604,11 @@ The interface is intentionally semantic and follows a GRF-style football action 
 The current authoritative contract is:
 
 ```text
-GMN_ENV_VERSION            = 3.0.0
-OBSERVATION_SCHEMA_VERSION = simple115_v2
+GMN_ENV_VERSION            = 3.1.0
+OBSERVATION_SCHEMA_VERSION = simple115_v3_role
 ACTION_SCHEMA_VERSION      = discrete19_v1
 
-OBSERVATION_DIM            = 115
+OBSERVATION_DIM            = 127
 ACTION_SPACE_SIZE          = 19
 ```
 

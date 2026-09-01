@@ -20,7 +20,7 @@ from training.mappo_networks import SharedActor
 class ActorPolicyOnnxModule(nn.Module):
     """
     Wrapper around SharedActor's underlying MLP network for deterministic ONNX export.
-    Maps input observation tensor (batch_size, 115) -> action logits (batch_size, 19).
+    Maps input observation tensor (batch_size, obs_dim) -> action logits (batch_size, 19).
     """
     def __init__(self, actor: SharedActor):
         super().__init__()
@@ -47,9 +47,12 @@ def export_to_onnx(
 
     # 1. Load PyTorch checkpoint
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    obs_dim = checkpoint.get("obs_dim", 115)
+    obs_dim = checkpoint.get("obs_dim", 127)
     action_dim = checkpoint.get("action_dim", 19)
     timesteps = checkpoint.get("timesteps", "unknown")
+
+    if obs_dim != 127:
+        print(f"[WARNING] Checkpoint obs_dim={obs_dim} differs from canonical GMN-Football-3 OBSERVATION_DIM (127).")
 
     print(f"\n1. Loaded Checkpoint:")
     print(f"   Timesteps: {timesteps} | Obs Dim: {obs_dim} | Action Dim: {action_dim}")
@@ -98,7 +101,7 @@ def export_to_onnx(
     # 4. Extract weights from PyTorch state dict and compare against ONNX initializers
     print(f"\n3. Verifying Layer Weight & Bias Parity between PyTorch Checkpoint and ONNX...")
     state_dict = actor.state_dict()
-    pt_w0 = state_dict["net.0.weight"].numpy() # (64, 115)
+    pt_w0 = state_dict["net.0.weight"].numpy() # (64, obs_dim)
     pt_b0 = state_dict["net.0.bias"].numpy()   # (64,)
     pt_w1 = state_dict["net.2.weight"].numpy() # (64, 64)
     pt_b1 = state_dict["net.2.bias"].numpy()   # (64,)
@@ -117,7 +120,7 @@ def export_to_onnx(
     # Match weights in ONNX graph
     found_weights = 0
     for name, arr in onnx_tensors.items():
-        if arr.shape == (64, 115):
+        if arr.shape == (64, obs_dim):
             diff = np.max(np.abs(arr - pt_w0))
             print(f"   ✓ Layer 0 Weight matched in ONNX ({name}): max diff = {diff:.10e}")
             assert diff == 0.0, f"Layer 0 weight mismatch: {diff}"
@@ -141,13 +144,14 @@ def export_to_onnx(
         smoke_ckpt = torch.load(smoke_path, map_location="cpu")
         smoke_w0 = smoke_ckpt["actor"]["net.0.weight"].numpy()
         smoke_w2 = smoke_ckpt["actor"]["net.4.weight"].numpy()
-        diff_w0 = np.max(np.abs(pt_w0 - smoke_w0))
-        diff_w2 = np.max(np.abs(pt_w2 - smoke_w2))
-        print(f"\n4. Distinctness Check against SMOKE Checkpoint ({smoke_path}):")
-        print(f"   Max abs difference in Layer 0 weight (w0): {diff_w0:.6f}")
-        print(f"   Max abs difference in Layer 2 weight (w2): {diff_w2:.6f}")
-        assert diff_w0 > 0.01, f"Trained checkpoint weights are identical to smoke checkpoint! diff={diff_w0}"
-        print(f"   ✓ Confirmed: Trained checkpoint is distinct from smoke checkpoint (w0 max diff: {diff_w0:.6f}).")
+        if smoke_w0.shape == pt_w0.shape:
+            diff_w0 = np.max(np.abs(pt_w0 - smoke_w0))
+            diff_w2 = np.max(np.abs(pt_w2 - smoke_w2))
+            print(f"\n4. Distinctness Check against SMOKE Checkpoint ({smoke_path}):")
+            print(f"   Max abs difference in Layer 0 weight (w0): {diff_w0:.6f}")
+            print(f"   Max abs difference in Layer 2 weight (w2): {diff_w2:.6f}")
+            assert diff_w0 > 0.01, f"Trained checkpoint weights are identical to smoke checkpoint! diff={diff_w0}"
+            print(f"   ✓ Confirmed: Trained checkpoint is distinct from smoke checkpoint (w0 max diff: {diff_w0:.6f}).")
 
     # 6. Generate synchronized TypeScript embedded weights file
     print(f"\n5. Generating TypeScript Embedded Weights file: {ts_weights_path}...")
@@ -172,7 +176,7 @@ export const MAPPO_WEIGHTS = {{
     print(f"   ✓ Saved synchronized TypeScript weights ({os.path.getsize(ts_weights_path)} bytes).")
 
     # 7. Verification inference test
-    test_obs = torch.tensor([[(i * 0.031) - 0.5 for i in range(115)]], dtype=torch.float32)
+    test_obs = torch.tensor([[(i * 0.031) - 0.5 for i in range(obs_dim)]], dtype=torch.float32)
     with torch.no_grad():
         pt_logits = model(test_obs).numpy()[0]
 

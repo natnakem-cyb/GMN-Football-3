@@ -1,6 +1,7 @@
 import { ActionType, AgentAction, GameMode } from '../types/football';
 import { AgentDecisionContext, IAgent } from './BaseAgent';
 import { ObservationEncoder } from '../engine/ObservationEncoder';
+import { OBSERVATION_DIM } from '../engine/Contract';
 import { MAPPO_WEIGHTS } from './mappo_weights';
 
 const SQRT_HALF = 0.7071067811865476;
@@ -32,7 +33,7 @@ export class TrainedPolicyAgent implements IAgent {
    * Evaluates the observation vector through the trained multi-layer perceptron (MLP).
    */
   decide(context: AgentDecisionContext): AgentAction {
-    // Encode standard 115-float GRF observation vector using the shared ObservationEncoder
+    // Encode standard OBSERVATION_DIM-float (127) GRF observation vector using the shared ObservationEncoder
     const obs = ObservationEncoder.encode(
       context.allPlayers,
       context.ball,
@@ -64,19 +65,19 @@ export class TrainedPolicyAgent implements IAgent {
 
   /**
    * Direct forward-pass MLP evaluation of the trained actor network:
-   * Layer 0: Linear(115, 64) -> Tanh
+   * Layer 0: Linear(OBSERVATION_DIM, 64) -> Tanh (where OBSERVATION_DIM = 127)
    * Layer 1: Linear(64, 64) -> Tanh
    * Layer 2: Linear(64, 19) -> Logits
    */
   private computeForwardMath(obs: number[]): number[] {
     const { w0, b0, w1, b1, w2, b2 } = MAPPO_WEIGHTS;
 
-    // Layer 0: Linear(115, 64) -> Tanh
+    // Layer 0: Linear(OBSERVATION_DIM, 64) -> Tanh
     const h0 = new Float32Array(64);
     for (let i = 0; i < 64; i++) {
       let sum = b0[i];
-      const offset = i * 115;
-      for (let j = 0; j < 115; j++) {
+      const offset = i * OBSERVATION_DIM;
+      for (let j = 0; j < OBSERVATION_DIM; j++) {
         sum += w0[offset + j] * obs[j];
       }
       h0[i] = Math.tanh(sum);

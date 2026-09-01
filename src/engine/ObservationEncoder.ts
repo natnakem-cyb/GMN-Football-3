@@ -31,7 +31,7 @@ export class ObservationEncoder {
   static encode(
     players: Player[],
     ball: Ball,
-    activePlayerId: string | null,
+    viewpointPlayerId: string | null,
     score: MatchScore,
     stepCount: number,
     maxSteps: number,
@@ -61,11 +61,11 @@ export class ObservationEncoder {
       }
     }
 
-    const activeIndex = activePlayerId
-      ? leftPlayers.findIndex((p) => p.id === activePlayerId)
+    const activeIndex = viewpointPlayerId
+      ? leftPlayers.findIndex((p) => p.id === viewpointPlayerId)
       : (leftPlayers.length > 0 ? 0 : -1);
 
-    // Construct flat rawVector with exactly 115 floats
+    // Construct flat rawVector with exactly OBSERVATION_DIM (127) floats
     const rawVector: number[] = [];
 
     // 0..21 (Length 22): Left team player (x, y) positions, 11 players
@@ -117,7 +117,7 @@ export class ObservationEncoder {
       ballOwnedTeam === 1 ? 1.0 : 0.0
     );
 
-    // 97..107 (Length 11): Active player, one-hot over 11 players
+    // 97..107 (Length 11): Viewpoint / Controlled player, one-hot over 11 players
     for (let i = 0; i < 11; i++) {
       rawVector.push(activeIndex === i ? 1.0 : 0.0);
     }
@@ -136,9 +136,9 @@ export class ObservationEncoder {
       rawVector.push(gameMode === mode ? 1.0 : 0.0);
     }
 
-    // 115..126 (Length 12): Active Agent Role One-Hot over ROLE_VOCABULARY
-    const activePlayer = activePlayerId ? players.find((p) => p.id === activePlayerId) : leftPlayers[0];
-    const role = activePlayer?.role;
+    // 115..126 (Length 12): Self Agent Role One-Hot over ROLE_VOCABULARY
+    const viewpointPlayer = viewpointPlayerId ? players.find((p) => p.id === viewpointPlayerId) : leftPlayers[0];
+    const role = viewpointPlayer?.role;
     for (let r = 0; r < ROLE_VOCABULARY.length; r++) {
       rawVector.push(role === ROLE_VOCABULARY[r] ? 1.0 : 0.0);
     }
