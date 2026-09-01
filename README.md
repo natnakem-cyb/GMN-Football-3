@@ -1,6 +1,6 @@
 # ⚽ GMN-Football-3
 
-**A browser-native football simulation and reinforcement-learning research platform.**
+**A Browser-Native Football Simulation & Reinforcement-Learning Research Platform.**
 
 One authoritative TypeScript game engine drives both an interactive browser match and a headless Python RL training pipeline (Gymnasium / PettingZoo → Stable-Baselines3 / custom PPO, IPPO, MAPPO), so an agent is always trained against the exact same physics and rules a human plays against.
 
