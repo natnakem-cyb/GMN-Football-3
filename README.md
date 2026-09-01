@@ -1,1392 +1,320 @@
 # ⚽ GMN-Football-3
 
-### Modern Browser-Native Football Simulation & Reinforcement Learning Platform
+**A browser-native football simulation and reinforcement-learning research platform.**
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+One authoritative TypeScript game engine drives both an interactive browser match and a headless Python RL training pipeline (Gymnasium / PettingZoo → Stable-Baselines3 / custom PPO, IPPO, MAPPO), so an agent is always trained against the exact same physics and rules a human plays against.
+
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Language: TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
-[![Frontend: React](https://img.shields.io/badge/Frontend-React-61DAFB.svg)](https://react.dev/)
+[![Frontend: React 18](https://img.shields.io/badge/Frontend-React%2018-61DAFB.svg)](https://react.dev/)
 [![Build: Vite](https://img.shields.io/badge/Build-Vite-646CFF.svg)](https://vitejs.dev/)
-[![RL: Gymnasium](https://img.shields.io/badge/RL-Gymnasium-5B8DEF.svg)](https://gymnasium.farama.org/)
-[![RL: SB3 PPO](https://img.shields.io/badge/RL-Stable--Baselines3%20PPO-EA7C2B.svg)](https://stable-baselines3.readthedocs.io/)
+[![RL: Gymnasium + PettingZoo](https://img.shields.io/badge/RL-Gymnasium%20%2B%20PettingZoo-5B8DEF.svg)](https://gymnasium.farama.org/)
+[![RL: SB3 PPO / IPPO / MAPPO](https://img.shields.io/badge/RL-PPO%20%2F%20IPPO%20%2F%20MAPPO-EA7C2B.svg)](https://stable-baselines3.readthedocs.io/)
 
-> **GMN-Football-3 is a browser-native football simulation and reinforcement-learning research platform built around one authoritative TypeScript game engine.**
->
-> The same simulation is designed to run interactively in the browser and headlessly for reinforcement-learning workloads, with deterministic state transitions, versioned environment contracts, scenario-driven training, and a modern Gymnasium → Stable-Baselines3 → PyTorch pipeline.
+> **Status:** RL-ready simulation and research platform. There is not yet a policy trained to play a full match — see [Current Status](#current-status) for exactly what has and hasn't been trained so far.
 
 ---
 
 ## Table of Contents
 
-- [Project Overview](#project-overview)
-- [Objectives](#objectives)
-- [Core Design Principles](#core-design-principles)
+- [Overview](#overview)
 - [Architecture](#architecture)
+- [Environment Contract](#environment-contract)
 - [Technology Stack](#technology-stack)
 - [Repository Structure](#repository-structure)
-- [Authoritative Simulation Engine](#authoritative-simulation-engine)
-- [Agent Architecture](#agent-architecture)
-- [Football Rules and Match State](#football-rules-and-match-state)
-- [Observation Space](#observation-space)
-- [Action Space](#action-space)
-- [Environment Contract](#environment-contract)
-- [RL Training Architecture](#rl-training-architecture)
-- [Transport Layer](#transport-layer)
-- [Determinism and Reproducibility](#determinism-and-reproducibility)
-- [Scenarios and Curriculum](#scenarios-and-curriculum)
-- [Events and Metrics](#events-and-metrics)
-- [Validation and Testing](#validation-and-testing)
-- [Performance](#performance)
-- [Quick Start](#quick-start)
-- [Running the RL Environment](#running-the-rl-environment)
-- [Project Development Workflow](#project-development-workflow)
+- [Quick Start (Browser App)](#quick-start-browser-app)
+- [Running the RL Training Pipeline](#running-the-rl-training-pipeline)
+- [Scenarios](#scenarios)
+- [Testing & Validation](#testing--validation)
 - [Current Status](#current-status)
-- [Roadmap](#roadmap)
-- [Research Direction](#research-direction)
-- [Design Constraints](#design-constraints)
+- [Known Limitations](#known-limitations)
 - [Contributing](#contributing)
 - [License](#license)
 
 ---
 
-# Project Overview
+## Overview
 
-GMN-Football-3 is intended to be more than a conventional football game.
-
-It is a **shared simulation platform** where:
+GMN-Football-3 is built around a single design decision: **the browser game and the RL environment do not maintain separate simulators.** The TypeScript `GameEngine` in `src/engine/` is authoritative. The browser renders and controls it interactively; a headless Node.js bridge exposes the same engine to Python training code over HTTP or a binary WebSocket protocol.
 
 ```text
                     GMN FOOTBALL WORLD
                            │
             ┌──────────────┴──────────────┐
-            │                             │
-         HUMAN                           AI
-            │                             │
+            │                              │
+         HUMAN                            AI
+            │                              │
        Browser UI                    RL Environment
-            │                             │
-       React/Canvas                  Gymnasium
-                                          │
-                                  Stable-Baselines3
-                                          │
-                                      PyTorch
+            │                              │
+       React / Canvas          Gymnasium / PettingZoo
+                                            │
+                              Stable-Baselines3 PPO,
+                              custom IPPO / MAPPO
+                                            │
+                                        PyTorch
 ```
 
-The central architectural decision is that the browser game and RL environment do **not** maintain separate football simulators.
+This means: no separate "training physics" that quietly diverges from what a human sees, and no re-implementation risk between the game and the research environment.
 
-The TypeScript `GameEngine` is the authoritative simulation. The browser presents it interactively, while a headless Node.js process exposes it to Python training code through the bridge layer.
-
----
-
-# Objectives
-
-## Primary Objective
-
-Build a deterministic 2D football world that can function simultaneously as:
-
-1. an interactive football game;
-2. a headless simulation environment;
-3. a reproducible reinforcement-learning benchmark;
-4. a foundation for multi-agent football research.
-
-## AI Objective
-
-The long-term objective is to progress from low-level control to increasingly intelligent football behavior:
+## Architecture
 
 ```text
-Movement
-   ↓
-Ball Approach
-   ↓
-Possession
-   ↓
-Dribbling
-   ↓
-Passing
-   ↓
-Shooting
-   ↓
-Positioning
-   ↓
-Defending
-   ↓
-Coordination
-   ↓
-Self-Play
-   ↓
-11-vs-11 Football Intelligence
+                      TypeScript GameEngine (authoritative)
+                                    │
+        ┌───────────────────────────┼───────────────────────────┐
+        │                           │                           │
+        ▼                           ▼                           ▼
+  Browser / React             Headless Node bridge         Scripts (tests,
+  (src/App.tsx)               (training/bridge_server.ts)  benchmarks, audits)
+                                    │
+                        ┌───────────┴───────────┐
+                        │                       │
+                    HTTP bridge            Binary WebSocket
+                        │                       │
+                        └───────────┬───────────┘
+                                    ▼
+                     Python: Gymnasium env (gmn_gym.py)
+                     Python: PettingZoo env (gmn_pettingzoo.py)
+                                    │
+                     Stable-Baselines3 PPO  /  custom IPPO  /  custom MAPPO
+                                    │
+                                 PyTorch
 ```
 
-## Engineering Objective
-
-Maintain a strict separation between:
-
-```text
-Simulation
-Training Interface
-Transport
-Learning Algorithm
-Presentation
-```
-
-so changes to one layer do not require rewriting the entire system.
-
----
-
-# Core Design Principles
-
-## 1. One Authoritative Simulation
-
-The same `GameEngine.ts` implementation serves:
-
-- browser gameplay;
-- headless execution;
-- scripted evaluation;
-- RL training.
-
-This prevents the RL system from learning in a different football world than the interactive application.
-
-## 2. Deterministic Simulation
-
-All stochastic simulation mechanics use seeded randomness.
-
-The intended invariant is:
-
-```text
-same seed
-+
-same initial state
-+
-same action trajectory
-=
-same state / observation trajectory
-```
-
-The project uses a Mulberry32-based seeded RNG.
-
-## 3. Versioned Environment Contracts
-
-Current authoritative values:
-
-```text
-GMN_ENV_VERSION            = 3.0.0
-OBSERVATION_SCHEMA_VERSION = simple115_v2
-ACTION_SCHEMA_VERSION      = discrete19_v1
-
-OBSERVATION_DIM            = 115
-ACTION_SPACE_SIZE          = 19
-```
-
-These are centralized in `src/engine/Contract.ts`.
-
-## 4. Clean Reset Semantics
-
-A reset returns the exact initial observation at `t = 0`; reset must not advance the physics clock as an implicit first step.
-
-## 5. Transport Independence
-
-The authoritative engine is independent of the transport mechanism:
-
-```text
-TypeScript GameEngine
-        │
-        ├── HTTP bridge
-        │
-        └── Binary WebSocket bridge
-```
-
-The Gymnasium layer can select WebSocket or HTTP transport.
-
----
-
-# Architecture
-
-## High-Level Architecture
-
-```text
-                                 GMN-FOOTBALL-3
-                                        │
-                                        ▼
-                         ┌──────────────────────────┐
-                         │  TypeScript Game Engine   │
-                         │      AUTHORITATIVE        │
-                         └────────────┬─────────────┘
-                                      │
-       ┌──────────────────────────────┼──────────────────────────────┐
-       │                              │                              │
-       ▼                              ▼                              ▼
- Browser / React                Headless Node                  Test / Benchmark
-       │                              │                              │
-   Canvas / UI                 Bridge Server                     Scripts
-       │                              │
-       │                   ┌──────────┴──────────┐
-       │                   │                     │
-       │                 HTTP                Binary WS
-       │                   │                     │
-       │                   └──────────┬──────────┘
-       │                              ▼
-       │                     Python Gymnasium
-       │                              │
-       │                              ▼
-       │                 Stable-Baselines3 PPO
-       │                              │
-       │                           PyTorch
-       │
-       └────────────────────── same simulation ──────────────────────
-```
-
-## Internal Engine Architecture
+Inside the engine itself:
 
 ```text
 GameEngine
-│
-├── Players
-├── Ball
-├── Physics
-├── Possession
-├── Rules
-├── Match State
-├── Scenarios
-├── Agents
-├── Seeded RNG
-└── Observation Generation
+├── Players & Ball state
+├── Physics.ts        — movement, kicking, tackling, ball flight
+├── Rules.ts           — pitch geometry, formations, offside line
+├── SeededRNG.ts        — Mulberry32 deterministic PRNG
+├── ObservationEncoder.ts — RL observation vector + reward shaping
+└── Contract.ts        — versioned observation/action schema (single source of truth on the TS side)
 ```
 
-## RL Architecture
+## Environment Contract
 
-```text
-PPO
- │
- ▼
-GMNFootballEnv
- │
- ├── reset()
- ├── step(action)
- ├── observation_space
- └── action_space
- │
- ▼
-Transport Adapter
- │
- ├── Binary WebSocket
- └── HTTP
- │
- ▼
-Node Bridge
- │
- ▼
-GameEngine
- │
- ▼
-ObservationEncoder
- │
- ▼
-115-float observation
-```
+Defined in `src/engine/Contract.ts` — treat this file as authoritative if anything below drifts out of date:
 
----
+| Constant | Value |
+|---|---|
+| `GMN_ENV_VERSION` | `3.1.0` |
+| `OBSERVATION_SCHEMA_VERSION` | `simple115_v3_role` |
+| `ACTION_SCHEMA_VERSION` | `discrete19_v1` |
+| `BASE_OBSERVATION_DIM` | `115` (Google Research Football–style SMM/feature vector) |
+| `ROLE_DIM` | `12` (one-hot over `ROLE_VOCABULARY`) |
+| `OBSERVATION_DIM` | **`127`** (`BASE_OBSERVATION_DIM + ROLE_DIM`) |
+| `ACTION_SPACE_SIZE` | `19` (discrete) |
 
-# Technology Stack
+The 127-float observation layout (see `ObservationEncoder.ts` for the exact offsets): left-team positions (22) → left-team velocities (22) → right-team positions (22) → right-team velocities (22) → ball position (3) → ball velocity (3) → ball ownership one-hot (3) → active-player one-hot (11) → game-mode one-hot (7) → agent role one-hot (12).
+
+The 19 discrete actions cover 8-directional movement, idle, short/long/high pass, shot, sprint (+release), dribble (+release), release-direction, and slide tackle — see `training/action_mapping.ts` for the canonical mapping (mirrored in `TrainedPolicyAgent.ts` for in-browser inference).
+
+Python and TypeScript each declare their own copies of these constants (`gmn_gym.py`, `gmn_pettingzoo.py`, `Contract.ts`); the bridge's `/health` endpoint cross-checks `observation_dim`/`action_space_size` at connection time and raises if they disagree.
+
+## Technology Stack
 
 | Layer | Technology |
 |---|---|
-| Primary language | TypeScript |
-| UI | React 18 |
-| Build/dev tooling | Vite |
-| Styling | Tailwind / PostCSS / CSS |
-| UI utilities | Lucide React, `clsx`, `tailwind-merge` |
-| Data visualization | Recharts |
-| Node bridge runtime | Node.js + `tsx` |
-| HTTP transport | HTTP/REST |
-| Binary transport | WebSocket |
-| WebSocket library | `ws` |
-| RL API | Gymnasium |
-| RL algorithm | Stable-Baselines3 PPO |
+| Simulation & game logic | TypeScript |
+| UI | React 18 + Vite |
+| Styling | Tailwind CSS / PostCSS |
+| Charts | Recharts |
+| Node bridge runtime | Node.js via `tsx` |
+| Transport | HTTP (REST) and binary WebSocket (`ws`) |
+| RL API (single-agent) | Gymnasium |
+| RL API (multi-agent) | PettingZoo (+ SuperSuit for vectorization) |
+| RL algorithms | Stable-Baselines3 PPO; custom IPPO and MAPPO implementations |
 | ML backend | PyTorch |
-| Simulation RNG | Mulberry32 seeded PRNG |
-| Contract layer | TypeScript `Contract.ts` |
+| Browser inference | Hand-rolled MLP forward pass over exported weights (see [Known Limitations](#known-limitations) re: the shipped but unused `onnxruntime-web`/ONNX export path) |
+| Deterministic RNG | Mulberry32 (`SeededRNG.ts`) |
+| Optional AI match commentary | `@google/genai` (Gemini API, via `src/services/geminiService.ts`) |
 | License | Apache-2.0 |
 
----
-
-# Repository Structure
+## Repository Structure
 
 ```text
 GMN-Football-3/
-│
 ├── src/
-│   ├── agents/
-│   │   ├── BaseAgent.ts
-│   │   ├── HumanAgent.ts
-│   │   ├── NeuralHeuristicAgent.ts
-│   │   ├── RuleBasedAgent.ts
-│   │   └── ScriptedScenarioAgent.ts
-│   │
-│   ├── components/
-│   ├── engine/
-│   │   ├── Contract.ts
+│   ├── engine/            # Authoritative simulation
 │   │   ├── GameEngine.ts
-│   │   ├── ObservationEncoder.ts
 │   │   ├── Physics.ts
 │   │   ├── Rules.ts
+│   │   ├── ObservationEncoder.ts
 │   │   ├── SeededRNG.ts
+│   │   ├── Contract.ts
+│   │   ├── EventEncoder.ts
 │   │   └── Vector.ts
-│   │
-│   ├── scenarios/
-│   ├── services/
+│   ├── agents/            # Decision-making policies
+│   │   ├── BaseAgent.ts
+│   │   ├── HumanAgent.ts
+│   │   ├── RuleBasedAgent.ts
+│   │   ├── NeuralHeuristicAgent.ts
+│   │   ├── ScriptedScenarioAgent.ts
+│   │   ├── TrainedPolicyAgent.ts
+│   │   └── mappo_weights.ts   # generated — exported trained-policy weights
+│   ├── scenarios/          # Scenario/curriculum registry
+│   ├── components/          # React UI
+│   ├── services/           # Gemini-based match commentary (optional)
 │   ├── types/
-│   ├── App.tsx
-│   ├── main.tsx
-│   └── index.css
+│   ├── App.tsx / main.tsx / index.css
 │
-├── training/
+├── training/               # Python + TS training/eval/bridge code
+│   ├── bridge_server.ts     # Node bridge: HTTP + binary WebSocket
 │   ├── action_mapping.ts
-│   ├── audit_observations_and_actions.ts
-│   ├── benchmark.ts
-│   ├── benchmark_bridge.py
-│   ├── benchmark_bridge_ws.py
-│   ├── bridge_server.ts
-│   ├── eval_checkpoint.py
-│   ├── gmn_gym.py
+│   ├── gmn_gym.py           # Gymnasium single-agent env
+│   ├── gmn_pettingzoo.py    # PettingZoo multi-agent env
+│   ├── train_ppo.py / train_stage2_ppo.py
+│   ├── train_ippo.py / eval_ippo_baseline.py
+│   ├── train_mappo.py / mappo_networks.py / mappo_rollout.py / mappo_update.py / eval_mappo.py
+│   ├── export_onnx.py / onnx_proto_builder.py
+│   ├── episode_recorder.py / trace_to_frames.py / binary_event_decoder.py
+│   ├── eval_checkpoint.py / eval_progress.py / eval_generalization.py / generate_comparison_table.py
 │   ├── rl_validation_suite.py
-│   ├── scripted_eval.ts
-│   ├── stage2_audit_and_baseline.ts
-│   ├── stage2_full_validation.py
-│   ├── test_determinism.ts
-│   ├── test_e2e_determinism.py
-│   ├── test_env.py
-│   ├── test_scenarios.ts
-│   ├── test_transport_parity.py
-│   ├── train_ppo.py
-│   ├── train_stage2_ppo.py
-│   └── verify_scenario_playability.ts
+│   ├── benchmark.ts / benchmark_bridge.py / benchmark_bridge_ws.py
+│   ├── test_*.ts / test_*.py   # determinism, transport parity, scenario, multi-agent tests
+│   ├── audit_observations_and_actions.ts / stage2_audit_and_baseline.ts
+│   ├── verify_scenario_playability.ts / scripted_eval.ts
+│   ├── models/              # Checkpoints (currently: smoke tests + one drill-scenario run — see Current Status)
+│   └── results/             # win_rate_progress.csv, comparison_table.md/.html
 │
-├── .env.example
-├── CONTRIBUTING.md
-├── LICENSE
-├── metadata.json
+├── public/models/           # mappo_policy.onnx (exported, not currently loaded by the browser app)
+├── requirements.txt          # Python deps (root)
+├── training/requirements.txt # Python deps (training-pinned — has stricter/older version bounds than the root file; prefer this one for training)
 ├── package.json
-├── tsconfig.json
-├── vite.config.ts
-├── tailwind.config.js
-└── postcss.config.js
+├── tsconfig.json             # NOTE: only includes `src/` — training/*.ts is not currently type-checked
+├── vite.config.ts / tailwind.config.js / postcss.config.js
+├── .env.example              # GEMINI_API_KEY (optional, for AI match commentary)
+├── LICENSE (Apache-2.0)
+└── CONTRIBUTING.md
 ```
 
----
+## Quick Start (Browser App)
 
-# Authoritative Simulation Engine
-
-The `src/engine/` directory is the core of GMN-Football-3.
-
-## `GameEngine.ts`
-
-Central simulation orchestrator.
-
-Responsibilities include:
-
-- player state;
-- ball state;
-- physics updates;
-- possession;
-- match state;
-- actions;
-- scoring;
-- scenarios;
-- rule transitions;
-- observations;
-- deterministic state progression.
-
-## `Physics.ts`
-
-Handles movement and physical interactions.
-
-## `Rules.ts`
-
-Encodes football and match-level rules.
-
-## `ObservationEncoder.ts`
-
-Converts authoritative simulation state into the canonical RL observation vector.
-
-## `SeededRNG.ts`
-
-Provides deterministic pseudo-randomness for simulation events.
-
-## `Vector.ts`
-
-Shared vector mathematics.
-
-## `Contract.ts`
-
-The authoritative interface specification for:
-
-- environment version;
-- observation schema;
-- action schema;
-- observation dimension;
-- action-space size;
-- event-code mapping;
-- environment metadata.
-
----
-
-# Agent Architecture
-
-GMN separates **the football simulation** from **the controller controlling an actor**.
-
-Current controller types include:
-
-```text
-BaseAgent
-├── HumanAgent
-├── RuleBasedAgent
-├── NeuralHeuristicAgent
-└── ScriptedScenarioAgent
-```
-
-Conceptually:
-
-```text
-                    GameEngine
-                        │
-                ┌───────┴───────┐
-                │               │
-              Player          Player
-                │               │
-             Controller      Controller
-                │               │
-        ┌───────┼────────┐      │
-        │       │        │      │
-      Human   Rule     Neural   PPO
-```
-
-The current bridge-driven single-agent configuration gives the RL policy the controlled player while automated agents drive the remaining players.
-
-This design provides a clean path toward future shared-policy and multi-agent control.
-
----
-
-# Football Rules and Match State
-
-GMN-Football-3 increasingly models football as a **stateful match simulation**, rather than only a movement sandbox.
-
-## Match modes
-
-```text
-Normal
-KickOff
-GoalKick
-FreeKick
-Corner
-ThrowIn
-Penalty
-```
-
-## Event categories
-
-```text
-goal
-shot
-shot_saved
-shot_missed
-pass
-interception
-tackle
-foul
-kickoff
-out_of_bounds
-scenario_complete
-scenario_failed
-```
-
-The engine has also been expanded with football-specific logic including:
-
-- offside;
-- tackle fouls;
-- disciplinary state;
-- yellow/red card handling;
-- goalkeeper saves;
-- shot placement;
-- shot tracking;
-- shooting metrics;
-- match-state transitions.
-
-This moves the simulation toward a rule-bearing football state machine.
-
----
-
-# Observation Space
-
-## Canonical Shape
-
-```text
-(127,)
-dtype = float32
-```
-
-> **Breaking Change (115 → 127 Migration):**  
-> In GMN v3.1.0 (`simple115_v3_role`), the observation vector was extended by 12 floats (`115..126`) representing the agent's self-role one-hot vector across `ROLE_VOCABULARY` (GK, CB, LB, RB, CDM, CM, LM, RM, LW, RW, CAM, ST).  
-> Checkpoints trained on the legacy 115-dim observation space are incompatible and will raise a descriptive runtime error if loaded without re-training.  
-> **Commands to re-train and re-export:**
-> ```bash
-> # Start bridge server
-> npx tsx training/bridge_server.ts
-> # Run MAPPO training (Python)
-> python3 training/train_mappo.py --scenario academy_3_vs_1_with_keeper --timesteps 50000
-> # Export ONNX & browser weights
-> python3 training/export_onnx.py --checkpoint training/models/mappo_academy_3_vs_1_with_keeper_trained.pt
-> ```
-
-The Gymnasium environment exposes:
-
-```python
-spaces.Box(
-    low=-5.0,
-    high=5.0,
-    shape=(127,),
-    dtype=np.float32,
-)
-```
-
-## Layout
-
-| Offset | Length | Description |
-|---|---:|---|
-| `0..21` | 22 | Left-team player positions `(x,y)` |
-| `22..43` | 22 | Left-team player velocities `(dx,dy)` |
-| `44..65` | 22 | Right-team player positions `(x,y)` |
-| `66..87` | 22 | Right-team player velocities `(dx,dy)` |
-| `88..90` | 3 | Ball position `(x,y,z)` |
-| `91..93` | 3 | Ball velocity `(dx,dy,dz)` |
-| `94..96` | 3 | Possession one-hot |
-| `97..107` | 11 | Viewpoint / Active controlled player one-hot |
-| `108..114` | 7 | Match-mode one-hot |
-| `115..126` | 12 | Agent self-role one-hot (`ROLE_VOCABULARY`) |
-
-Unused player slots are represented according to the current observation encoder.
-
----
-
-# Action Space
-
-## Canonical Shape
-
-```text
-Discrete(19)
-```
-
-| ID | Action | Type |
-|---:|---|---|
-| 0 | `action_idle` | No-op |
-| 1 | `action_left` | Directional |
-| 2 | `action_top_left` | Directional |
-| 3 | `action_top` | Directional |
-| 4 | `action_top_right` | Directional |
-| 5 | `action_right` | Directional |
-| 6 | `action_bottom_right` | Directional |
-| 7 | `action_bottom` | Directional |
-| 8 | `action_bottom_left` | Directional |
-| 9 | `action_long_pass` | Pass |
-| 10 | `action_high_pass` | Pass |
-| 11 | `action_short_pass` | Pass |
-| 12 | `action_shot` | Shot |
-| 13 | `action_sprint` | Movement |
-| 14 | `action_release_direction` | Movement |
-| 15 | `action_release_sprint` | Movement |
-| 16 | `action_sliding` | Tackle |
-| 17 | `action_dribble` | Ball control |
-| 18 | `action_release_dribble` | Ball control |
-
-The interface is intentionally semantic and follows a GRF-style football action vocabulary while being executed by GMN's own engine.
-
----
-
-# Environment Contract
-
-The current authoritative contract is:
-
-```text
-GMN_ENV_VERSION            = 3.1.0
-OBSERVATION_SCHEMA_VERSION = simple115_v3_role
-ACTION_SCHEMA_VERSION      = discrete19_v1
-
-OBSERVATION_DIM            = 127
-ACTION_SPACE_SIZE          = 19
-```
-
-`Contract.ts` is the single source of truth for the environment and neural interface.
-
-## Contract consumers
-
-```text
-Contract.ts
-    │
-    ├── GameEngine
-    ├── ObservationEncoder
-    ├── bridge_server.ts
-    ├── action_mapping.ts
-    ├── gmn_gym.py
-    └── training/evaluation
-```
-
-## Versioning policy
-
-Any observation or action semantic change should:
-
-1. update the schema version;
-2. update TypeScript validation;
-3. update Python validation;
-4. rerun deterministic tests;
-5. rerun audits;
-6. evaluate checkpoint compatibility.
-
----
-
-# RL Training Architecture
-
-The current learning path is:
-
-```text
-                PPO
-                 │
-                 ▼
-        Stable-Baselines3
-                 │
-              PyTorch
-                 │
-                 ▼
-             Gymnasium
-                 │
-                 ▼
-         GMNFootballEnv
-                 │
-       ┌─────────┴─────────┐
-       │                   │
-   Binary WS              HTTP
-       │                   │
-       └─────────┬─────────┘
-                 ▼
-            Node Bridge
-                 │
-                 ▼
-            GameEngine
-                 │
-                 ▼
-         ObservationEncoder
-```
-
-`training/gmn_gym.py` provides the standard Gymnasium environment lifecycle and validates the 127-dimensional observation and 19-action contract.
-
-## RL Modes
-
-- **Single-Agent PPO**: `training/train_ppo.py` for single controlled agent curriculum scenarios.
-- **Multi-Agent MAPPO**: `training/train_mappo.py` using a Deep Sets centralized critic with permutation-invariant dual aggregation (`[mean_pool, max_pool]`).
-- **IPPO (Deprecated)**: IPPO is deprecated and superseded by MAPPO; root cause analysis is documented in `training/ippo_credit_assignment_report.md`.
-
-### Regenerating Browser Neural Policy Weights (Requires Local Run)
-
-The environment's observation contract migrated from 115 dimensions to 127 dimensions to support explicit per-agent role one-hot channels. Existing checkpoints in `training/models/` (`mappo_academy_3_vs_1_with_keeper_trained.pt`) were trained under the legacy 115-dim contract.
-
-To regenerate weights compatible with the current browser runtime, execute the following commands in your local training environment:
-
-```bash
-# 1. Retrain to produce a 127-dim checkpoint (obs_dim now 127 after the role-channel migration)
-python3 training/train_mappo.py --scenario academy_3_vs_1_with_keeper --timesteps 200000
-
-# 2. Re-export both ONNX and the browser weights from the NEW checkpoint
-python3 training/export_onnx.py --checkpoint training/models/mappo_academy_3_vs_1_with_keeper_trained.pt
-```
-
-> **Note**: Until Step 1 and 2 are executed in a local training run, `src/agents/mappo_weights.ts` contains legacy 115-dim weights. Runtime shape assertions in `TrainedPolicyAgent.ts` and `export_onnx.py` will actively block execution and fall back safely to Tactical Rule AI to prevent silent NaN logits.
->
-> **Team B / Right-Side Neural Mirroring**: Neural policies are currently trained strictly for Left-side attackers targeting the Right goal. Right-team neural play (mirroring coordinates/actions) is planned future work.
-
-
----
-
-# Transport Layer
-
-## HTTP
-
-```text
-Python
-  ↓
-HTTP
-  ↓
-Node bridge
-  ↓
-GameEngine
-```
-
-The repository currently documents approximately **350–500 steps/sec** for the Python/Node HTTP roundtrip.
-
-## Binary WebSocket
-
-The current system also includes binary WebSocket transport:
-
-```text
-training/bridge_server.ts
-training/benchmark_bridge_ws.py
-training/test_transport_parity.py
-```
-
-The Gymnasium wrapper can use:
-
-```text
-ws://127.0.0.1:5050
-```
-
-instead of HTTP.
-
-## Transport parity
-
-The project verifies that transport changes do not change environment semantics:
-
-```text
-same seed
-+
-same action trajectory
-+
-HTTP
-        ↕
-Binary WebSocket
-
-Expected:
-same observations
-same rewards
-same termination
-same match result
-```
-
-This enables transport optimization without changing the authoritative simulation.
-
----
-
-# Determinism and Reproducibility
-
-## Target invariant
-
-```text
-Seed = S
-Initial State = I
-Actions = A
-
-          ↓
-
-Trajectory T
-```
-
-Repeated under the same engine version must produce the same trajectory.
-
-## Deterministic components
-
-- seeded RNG;
-- scenario initialization;
-- reset semantics;
-- action mapping;
-- engine state updates;
-- transport parity.
-
-## Benefits
-
-Deterministic execution enables:
-
-- RL experiment reproduction;
-- regression testing;
-- checkpoint comparison;
-- bug reproduction;
-- replay reconstruction;
-- transport verification.
-
----
-
-# Scenarios and Curriculum
-
-The scenario system allows task-specific training and validation.
-
-The repository currently validates **six academy/match scenarios**.
-
-A representative curriculum:
-
-```text
-Basic Control
-      ↓
-Run to Goal
-      ↓
-Keeper / Finish
-      ↓
-Pass + Shot
-      ↓
-Small-Sided Decision Making
-      ↓
-Multi-Agent Coordination
-      ↓
-Full Match
-```
-
-Each scenario can define:
-
-- initial player placement;
-- ball state;
-- objective;
-- completion condition;
-- failure condition;
-- reward context;
-- evaluation context.
-
-Scenario testing covers setup, spawning, observation correctness, and playability.
-
----
-
-# Events and Metrics
-
-The environment exposes a shared event-code vocabulary:
-
-```text
-goal
-shot
-shot_saved
-shot_missed
-pass
-interception
-tackle
-foul
-kickoff
-out_of_bounds
-scenario_complete
-scenario_failed
-```
-
-Events create a common foundation for:
-
-```text
-              Game Events
-                   │
-          ┌────────┼────────┐
-          │        │        │
-       Metrics   Replay     RL
-          │        │        │
-       Analytics Debugging Reward Design
-```
-
-This allows football analytics and reward design to evolve without coupling them directly to raw vector indices.
-
----
-
-# Validation and Testing
-
-## TypeScript
-
-```bash
-npm run lint
-npm run test
-npm run test:scenarios
-npm run test:determinism
-npm run test:audit
-npm run test:scripted
-npm run test:playability
-```
-
-## Python
-
-```bash
-npm run test:env
-npm run test:e2e
-npm run test:parity
-npm run test:validation
-```
-
-## PPO smoke test
-
-```bash
-npm run test:ppo
-```
-
-or:
-
-```bash
-python3 training/train_ppo.py 1000
-```
-
-## Recommended validation order
-
-```text
-Engine correctness
-      ↓
-Contract correctness
-      ↓
-Determinism
-      ↓
-Transport parity
-      ↓
-Gymnasium compliance
-      ↓
-Baseline evaluation
-      ↓
-PPO
-```
-
----
-
-# Performance
-
-The current repository reports approximately:
-
-| Component | Measured throughput |
-|---|---:|
-| Raw TypeScript engine | ~33,000 steps/sec |
-| Python ↔ Node HTTP bridge | ~350–500 steps/sec |
-
-The raw simulation is substantially faster than the current HTTP transport path.
-
-The WebSocket path is the current transport optimization direction. A definitive current WebSocket speedup should be measured with:
-
-```bash
-npm run benchmark:ws
-```
-
-Rather than hard-coding an unverified throughput claim.
-
-## Scaling priority
-
-```text
-Correctness
-   ↓
-Learning validity
-   ↓
-Transport optimization
-   ↓
-Batching / vectorization
-   ↓
-Multi-agent scale
-```
-
----
-
-# Quick Start
-
-## Install
+Requires Node.js 18+.
 
 ```bash
 npm install
+npm run dev        # http://localhost:3000
 ```
 
-## Start the browser application
+Other useful scripts:
 
 ```bash
-npm run dev
+npm run build       # tsc (src/ only) + vite build
+npm run lint         # tsc --noEmit (src/ only)
+npm run preview      # serve the production build
 ```
 
-Open:
+## Running the RL Training Pipeline
 
-```text
-http://localhost:3000
-```
-
-## Type check
+Requires Python 3.10+ and Node.js (the bridge server runs via `npx tsx`).
 
 ```bash
-npm run lint
+pip install -r training/requirements.txt
 ```
 
-## Production build
+**1. Start the bridge** (optional — training scripts will auto-launch it if it isn't already running):
 
 ```bash
-npm run build
+npm run bridge       # tsx training/bridge_server.ts, default port 5050
 ```
 
----
-
-# Running the RL Environment
-
-## Start bridge
+**2. Train.** Scripts wired into `package.json`:
 
 ```bash
-npm run bridge
+npm run test:ppo             # Stable-Baselines3 PPO, short smoke run (1,000 steps)
+npm run test:ippo            # Custom IPPO, short smoke run (3,072 steps)
+npm run test:ippo:train      # Custom IPPO, longer run (200,000 steps)
+npm run test:ippo:eval       # Evaluate/compare an IPPO checkpoint
 ```
 
-Default bridge address:
-
-```text
-127.0.0.1:5050
-```
-
-It can be overridden using:
-
-```text
-GMN_BRIDGE_PORT
-```
-
-## Validate Gymnasium
+MAPPO has no `package.json` shortcut yet — invoke it directly:
 
 ```bash
-python3 training/test_env.py
+python3 training/train_mappo.py
+python3 training/eval_mappo.py
 ```
 
-## Validate end-to-end determinism
+Both `train_ppo.py` and the custom trainers accept a `--scenario` (or positional step-count) argument — see each script's `argparse` setup for the current options. Training currently runs against a single environment instance per process (no parallel rollout collection yet).
+
+**3. Evaluate / inspect:**
 
 ```bash
-python3 training/test_e2e_determinism.py
+python3 training/eval_checkpoint.py
+python3 training/eval_progress.py
+python3 training/generate_comparison_table.py   # regenerates training/results/comparison_table.md
 ```
 
-## Validate transport parity
+## Scenarios
+
+Defined in `src/scenarios/ScenarioRegistry.ts`. Currently registered:
+
+| ID | Description |
+|---|---|
+| `academy_empty_goal` | 1 attacker, empty net — basic ball-approach/shooting drill |
+| `academy_run_to_score` | 1 attacker vs. 1 defender + keeper |
+| `academy_pass_and_shoot_with_keeper` | 2v2 passing + finishing drill |
+| `academy_3_vs_1_with_keeper` | 3 attackers vs. 1 defender + keeper |
+| `academy_3_vs_1_defender_2` / `_defender_3` | Harder variations, more defenders |
+| `academy_3_vs_1_keeper_aggressive` | Variation with a more aggressive keeper |
+| `academy_3_vs_1_shifted` / `_randomized` | Positional variations for generalization testing |
+| `5_vs_5` | Small-sided full match |
+| `11_vs_11` | Full-pitch full match |
+
+Only the `academy_*` drills currently have any completed training checkpoints — see [Current Status](#current-status).
+
+## Testing & Validation
 
 ```bash
-npm run test:parity
-```
-
-## Run PPO smoke test
-
-```bash
-python3 training/train_ppo.py 1000
-```
-
----
-
-# Project Development Workflow
-
-Recommended loop:
-
-```text
-1. Change simulation
-        ↓
-2. npm run lint
-        ↓
-3. Scenario validation
-        ↓
-4. Determinism tests
-        ↓
-5. Observation/action audit
-        ↓
-6. Transport parity
-        ↓
-7. Gymnasium validation
-        ↓
-8. Scripted baseline
-        ↓
-9. PPO smoke test
-        ↓
-10. Benchmark
-```
-
-## Rules for environment changes
-
-A change to:
-
-- physics;
-- ball handling;
-- possession;
-- fouls;
-- shooting;
-- goalkeeping;
-- offside;
-- restart logic;
-- player movement;
-
-is potentially an **RL environment change**.
-
-Those changes should therefore be accompanied by deterministic and environment-level regression tests.
-
----
-
-# Current Status
-
-## Implemented
-
-```text
-✅ Browser-native football application
-✅ Custom TypeScript simulation engine
-✅ Headless Node execution
-✅ React presentation layer
-✅ Agent abstraction
-✅ Deterministic seeded RNG
-✅ Strict environment contracts
-✅ 115-dimensional observation space
-✅ 19-action discrete action space
-✅ Scenario registry
-✅ Six scenario validation
-✅ Event-code system
-✅ Football rule/state expansion
-✅ Offside
-✅ Fouls / disciplinary mechanics
-✅ Goalkeeper save logic
-✅ Improved shooting / targeting
-✅ Gymnasium environment
-✅ Stable-Baselines3 PPO path
-✅ HTTP bridge
-✅ Binary WebSocket bridge
-✅ Transport parity testing
-✅ Determinism testing
-✅ Observation/action audits
-✅ Scripted evaluation
-✅ Benchmark tooling
-✅ Stage-2 RL tooling
-```
-
-## Active research areas
-
-```text
-⏳ Stronger PPO learning results
-⏳ Shared-policy MARL
-⏳ Centralized multi-agent critic
-⏳ Self-play
-⏳ Historical-opponent league
-⏳ Full 11-vs-11 learned teams
-⏳ Emergent tactical behavior
-```
-
-GMN-Football-3 should currently be described as an **RL-ready football simulation and research platform**, not as a finished autonomous 11-vs-11 football intelligence system.
-
----
-
-# Roadmap
-
-## Phase 1 — Simulation Foundation
-
-```text
-Simulation
-Determinism
-Contracts
-Rules
-Scenarios
-Validation
-```
-
-**Status: Substantially implemented**
-
-## Phase 2 — Single-Agent RL
-
-```text
-Gymnasium
-PPO
-Scenario curriculum
-Checkpoint evaluation
-```
-
-**Status: Active**
-
-## Phase 3 — Multi-Agent Learning
-
-```text
-Shared policy
-Multiple learned players
-Centralized critic
-```
-
-**Status: Research target**
-
-## Phase 4 — Self-Play
-
-```text
-Current policy
-       ↕
-Opponent policy
-       ↕
-Historical policies
-```
-
-**Status: Research target**
-
-## Phase 5 — Team Intelligence
-
-Evaluate:
-
-```text
-spacing
-support
-positioning
-pressing
-passing lanes
-defensive shape
-attacking coordination
-```
-
-## Phase 6 — 11-vs-11
-
-Target:
-
-```text
-11 learned agents
-        vs
-11 learned agents
-```
-
-with:
-
-- self-play;
-- historical opponents;
-- reproducible evaluation;
-- tactical metrics;
-- long-horizon behavioral analysis.
-
----
-
-# Research Direction
-
-GMN-Football-3 sits at the intersection of:
-
-```text
-Football Simulation
-        +
-Reinforcement Learning
-        +
-Multi-Agent Systems
-        +
-Behavioral Cloning
-        +
-Self-Play
-```
-
-A key research direction is to combine proven multi-agent football techniques—shared policies, centralized critics, attention, opponent stabilization, and self-play—with GMN's deterministic simulation and modern Gymnasium/SB3 architecture.
-
-The system should evolve from:
-
-```text
-single player
-     ↓
-small-sided learning
-     ↓
-shared multi-agent policy
-     ↓
-team coordination
-     ↓
-self-play
-     ↓
-11-vs-11
-```
-
-The ultimate objective is not merely scoring goals. It is learning behaviors such as:
-
-```text
-movement
-possession
-passing
-shooting
-positioning
-defending
-support
-spacing
-pressing
-team coordination
-tactical adaptation
-```
-
-without hard-coding those behaviors into the agent policy.
-
----
-
-# Design Constraints
-
-## Simulation Is Authoritative
-
-Do not implement duplicate football physics in Python.
-
-## Contracts Are Explicit
-
-Do not silently change observation or action semantics.
-
-## Determinism Is Required
-
-Randomness must be seeded and reproducible.
-
-## Transport Is Replaceable
-
-HTTP/WebSocket are interfaces to the simulation, not alternate simulation implementations.
-
-## Training Must Be Measurable
-
-A policy is not successful merely because:
-
-```text
-loss decreases
-reward is non-zero
-PPO finishes training
-```
-
-Success must be demonstrated against explicit baselines and reproducible evaluation.
-
-## Research Claims Must Match Evidence
-
-The project has a strong simulation and RL infrastructure foundation. Full multi-agent football intelligence remains an active research objective.
-
----
-
-# Contributing
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-Before submitting simulation changes, run:
-
-```bash
-npm run lint
-npm run test
+npm test                  # test_scenarios.ts + test_determinism.ts
+npm run test:scenarios
 npm run test:determinism
-npm run test:audit
-npm run test:parity
+npm run test:parity       # HTTP vs. WebSocket transport parity (Python)
+npm run test:e2e          # end-to-end determinism (Python)
+npm run test:multiagent   # multi-agent determinism (Python)
+npm run test:pettingzoo   # PettingZoo wrapper contract test (Python)
+npm run test:audit        # observation/action audit
+npm run test:playability  # scenario playability verification
+npm run test:validation   # rl_validation_suite.py
 ```
 
-For RL environment changes, also run:
+**Note:** `npm run lint` / `npm run build` only type-check `src/`. `training/*.ts` (including `bridge_server.ts`, `action_mapping.ts`) is executed directly via `tsx` and is not currently covered by `tsc`.
 
-```bash
-python3 training/test_env.py
-python3 training/test_e2e_determinism.py
-```
+## Current Status
 
----
+**Implemented:**
+- Deterministic, seeded (Mulberry32) TypeScript simulation shared by browser and headless paths
+- 127-dim observation encoder with role information; 19-action discrete action space
+- Offside, fouls/cards, goalkeeper saves, penalty/free-kick/corner/throw-in flow
+- HTTP + binary WebSocket bridge with transport-parity tests
+- Gymnasium (single-agent) and PettingZoo (multi-agent, left-team-only) environments
+- Stable-Baselines3 PPO integration, plus custom IPPO and MAPPO implementations
+- Scenario registry from 1v0 drills through 5v5 and 11v11
+- Determinism, transport-parity, and observation/action audit test suites
 
-# License
+**Not yet done — read before assuming a "trained agent" exists:**
+- No full training run has completed end-to-end. `training/results/comparison_table.md` has no filled-in rows yet, and `training/models/` contains only smoke-test checkpoints plus one completed run on the simplest drill scenario (`academy_3_vs_1_with_keeper`). Nothing has been trained on `5_vs_5` or `11_vs_11`.
+- Environment stepping is not parallelized (one environment instance per training process, each step a blocking round-trip to a single Node bridge process) — current throughput is well below what's typically needed for full-match RL training.
+- Training is single-sided: only the left team is ever the learning agent; the opponent is always a fixed-difficulty `RuleBasedAgent`. There is no self-play or opponent-checkpoint pool yet.
+- No curriculum scheduler — each training run targets one fixed scenario rather than progressing through the registry automatically.
 
-GMN-Football-3 is released under the **Apache License 2.0**.
+GMN-Football-3 should currently be described as **an RL-ready football simulation and research platform**, not as a system that already plays professional-level football.
 
-See [`LICENSE`](LICENSE).
+## Known Limitations
 
----
+A few things worth knowing if you're extending this codebase:
 
-## Project Links
+- **ONNX export path is currently unused.** `training/export_onnx.py` and `public/models/mappo_policy.onnx` exist, and `onnxruntime-web` is a declared dependency, but `src/agents/TrainedPolicyAgent.ts` does not load the `.onnx` file — it runs a hand-written forward pass against weights baked into `src/agents/mappo_weights.ts`. Pick one path before extending the deployment pipeline further.
+- **Determinism is not guaranteed for every agent.** `RuleBasedAgent` and tackle resolution (`PhysicsEngine.executeTackle`) correctly use the seeded RNG; `NeuralHeuristicAgent` and `HumanAgent` currently use `Math.random()` directly for some decisions, so browser-only opponent behavior isn't reproducible (this doesn't affect training determinism, since neither is wired into the bridge).
+- **Two Python requirements files** (`requirements.txt` and `training/requirements.txt`) exist with different version bounds — `training/requirements.txt` is the one training scripts are actually validated against.
+- **Contract constants are hand-duplicated** across `Contract.ts`, `gmn_gym.py`, and `gmn_pettingzoo.py`, reconciled only by a runtime health check rather than a single generated source.
 
-- **Repository:** https://github.com/natnakem-cyb/GMN-Football-3
-- **Wiki:** https://github.com/natnakem-cyb/GMN-Football-3/wiki
-- **License:** [`LICENSE`](LICENSE)
-- **Contributing:** [`CONTRIBUTING.md`](CONTRIBUTING.md)
+## Contributing
 
----
+See `CONTRIBUTING.md` for pull request and code review process. Note that file currently carries generic boilerplate (references to an unrelated CLA/project) and could use a project-specific pass.
 
-## Architecture at a Glance
+## License
 
-```text
-                                  GMN FOOTBALL
-                                       │
-                         ┌─────────────┴─────────────┐
-                         │                           │
-                    Interactive                  Training
-                         │                           │
-                    React/Canvas                Gymnasium
-                         │                           │
-                         ▼                    ┌──────┴──────┐
-                 TypeScript Engine            │             │
-                    AUTHORITATIVE           HTTP          WS
-                         │                    │             │
-          ┌──────────────┼──────────────┐     └──────┬──────┘
-          │              │              │            │
-       Physics         Rules         Agents           ▼
-          │              │              │       Node Bridge
-       Ball/Players     Match State   Human           │
-       Possession       Offside       RuleBased       ▼
-       Shooting        Fouls/Cards    Neural      GameEngine
-       Goalkeeping     Restarts       PPO             │
-          │              │              │             ▼
-          └──────────────┼──────────────┘       Observation
-                         │                           │
-                    Event / State              115 floats
-                         │                           │
-                         └──────────────┬────────────┘
-                                        ▼
-                                 SB3 PPO / PyTorch
-                                        │
-                                        ▼
-                            Future Multi-Agent RL
-                                        │
-                          ┌─────────────┴─────────────┐
-                          ▼                           ▼
-                       Self-Play                  11v11
-```
-
-> **GMN-Football-3 is being built as a deterministic football world first, an RL environment second, and eventually a multi-agent football intelligence platform.**
+Apache License 2.0 — see [LICENSE](LICENSE).
