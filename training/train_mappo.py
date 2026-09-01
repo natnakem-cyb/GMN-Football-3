@@ -31,6 +31,7 @@ from training.gmn_pettingzoo import GMNMultiAgentEnv
 from training.mappo_networks import SharedActor, CentralizedCritic
 from training.mappo_rollout import collect_rollout, compute_gae
 from training.mappo_update import ppo_update
+from training.eval_progress import evaluate_checkpoint_progress, persist_trend_snapshots
 
 
 def run_mappo_training(
@@ -97,6 +98,7 @@ def run_mappo_training(
     loss_history: List[Dict[str, Any]] = []
 
     last_check_step = 0
+    last_checkpoint_step = 0
     total_steps_elapsed = 0
 
     print(f"\n3. Starting MAPPO Training for {timesteps} steps...")
@@ -168,6 +170,35 @@ def run_mappo_training(
                 flush=True,
             )
 
+        # 100k-interval checkpoint saving and milestone evaluation
+        if total_steps_elapsed - last_checkpoint_step >= 100_000:
+            last_checkpoint_step = total_steps_elapsed
+            milestone_ckpt_name = f"mappo_{scenario}_{total_steps_elapsed}.pt"
+            milestone_ckpt_path = os.path.join(models_dir, milestone_ckpt_name)
+            torch.save(
+                {
+                    "actor": actor.state_dict(),
+                    "critic": critic.state_dict(),
+                    "obs_dim": obs_dim,
+                    "global_state_dim": global_state_dim,
+                    "action_dim": action_dim,
+                    "timesteps": total_steps_elapsed,
+                },
+                milestone_ckpt_path,
+            )
+            try:
+                evaluate_checkpoint_progress(
+                    checkpoint_path=milestone_ckpt_path,
+                    scenario=scenario,
+                    algorithm="MAPPO",
+                    step=total_steps_elapsed,
+                    learning_rate=3e-4,
+                    num_episodes=50,
+                    deterministic=True,
+                )
+            except Exception as e:
+                print(f"[Notice] MAPPO milestone eval notice: {e}")
+
     duration = time.time() - start_time
     fps = total_steps_elapsed / max(0.001, duration)
     print(f"\n   ✓ MAPPO Training completed in {duration:.2f}s ({fps:.1f} steps/sec)", flush=True)
@@ -191,6 +222,24 @@ def run_mappo_training(
         f"(size: {os.path.getsize(checkpoint_path)} bytes)",
         flush=True,
     )
+
+    # Persist trend snapshots
+    if trend_snapshots:
+        persist_trend_snapshots(trend_snapshots, algorithm="MAPPO", scenario=scenario)
+
+    # End-of-run milestone evaluation
+    try:
+        evaluate_checkpoint_progress(
+            checkpoint_path=checkpoint_path,
+            scenario=scenario,
+            algorithm="MAPPO",
+            step=total_steps_elapsed,
+            learning_rate=3e-4,
+            num_episodes=50,
+            deterministic=True,
+        )
+    except Exception as e:
+        print(f"[Notice] End-of-run MAPPO eval notice: {e}")
 
     # 5. Print Training Reward & Performance Trend Summary
     print("\n5. Training Reward & Performance Trend Summary:", flush=True)

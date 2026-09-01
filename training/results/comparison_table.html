@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+  <meta charset='UTF-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+  <title>GMN-Football-3 Benchmark Comparison</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 2rem; margin: 0; line-height: 1.5; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 { color: #38bdf8; font-size: 1.8rem; margin-bottom: 0.5rem; }
+    p.subtitle { color: #94a3b8; font-size: 0.95rem; margin-bottom: 2rem; }
+    .scenario-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 1.5rem; margin-bottom: 2.5rem; overflow-x: auto; }
+    .scenario-title { font-size: 1.25rem; font-weight: 600; color: #f1f5f9; margin-top: 0; margin-bottom: 1rem; }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
+    th { background: #0f172a; color: #cbd5e1; font-weight: 600; padding: 0.75rem 1rem; border-bottom: 2px solid #475569; }
+    td { padding: 0.75rem 1rem; border-bottom: 1px solid #334155; }
+    tr:hover { background: #283548; }
+    .step-col { font-weight: bold; color: #e2e8f0; font-family: monospace; }
+    .lr-col { font-family: monospace; color: #94a3b8; }
+    .win-rate-mappo { color: #4ade80; font-weight: bold; }
+    .win-rate-ippo { color: #60a5fa; font-weight: bold; }
+    .win-rate-ppo { color: #facc15; font-weight: bold; }
+    .empty-cell { color: #64748b; }
+    .badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; margin-left: 0.25rem; }
+    .badge-mappo { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
+    .badge-ippo { background: rgba(96, 165, 250, 0.15); color: #60a5fa; }
+    .badge-ppo { background: rgba(250, 204, 21, 0.15); color: #facc15; }
+  </style>
+</head>
+<body>
+  <div class='container'>
+    <h1>⚽ GMN-Football-3 Benchmark Comparison</h1>
+    <p class='subtitle'>Deterministic Checkpoint Evaluation Across 100k Timestep Intervals (Goal Conversion Rate & Policy Metrics)</p>
+    <div class='scenario-card'>
+      <div class='scenario-title'>Scenario: <code>academy_3_vs_1_with_keeper</code></div>
+      <table>
+        <thead>
+          <tr>
+            <th>Step</th>
+            <th>LR</th>
+            <th colspan='3'>MAPPO <span class='badge badge-mappo'>MAPPO</span></th>
+            <th colspan='3'>IPPO <span class='badge badge-ippo'>IPPO</span></th>
+          </tr>
+          <tr>
+            <th></th>
+            <th></th>
+            <th>Win-Rate</th>
+            <th>Mean Reward</th>
+            <th>Shots/Ep</th>
+            <th>Win-Rate</th>
+            <th>Mean Reward</th>
+            <th>Shots/Ep</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class='step-col'>100k</td>
+            <td class='lr-col'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+          </tr>
+          <tr>
+            <td class='step-col'>200k</td>
+            <td class='lr-col'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+          </tr>
+          <tr>
+            <td class='step-col'>300k</td>
+            <td class='lr-col'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+          </tr>
+          <tr>
+            <td class='step-col'>400k</td>
+            <td class='lr-col'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+          </tr>
+          <tr>
+            <td class='step-col'>500k</td>
+            <td class='lr-col'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+          </tr>
+          <tr>
+            <td class='step-col'>600k</td>
+            <td class='lr-col'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+          </tr>
+          <tr>
+            <td class='step-col'>700k</td>
+            <td class='lr-col'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+          </tr>
+          <tr>
+            <td class='step-col'>800k</td>
+            <td class='lr-col'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+          </tr>
+          <tr>
+            <td class='step-col'>900k</td>
+            <td class='lr-col'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+          </tr>
+          <tr>
+            <td class='step-col'>1000k</td>
+            <td class='lr-col'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+            <td class='empty-cell'>--</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

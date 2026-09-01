@@ -9,8 +9,72 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from training.gmn_gym import GMNFootballEnv
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+from training.eval_progress import evaluate_checkpoint_progress
+
+
+class PPOProgressLoggingCallback(BaseCallback):
+    """
+    Evaluates policy milestones every 100k steps and appends records to win_rate_progress.csv.
+    """
+
+    def __init__(
+        self,
+        save_freq: int = 100_000,
+        scenario: str = "academy_empty_goal",
+        models_dir: str = "training/models",
+        vec_env: VecNormalize = None,
+        initial_lr: float = 3e-4,
+        lr_schedule: str = "constant",
+        total_timesteps: int = 100_000,
+        eval_episodes: int = 50,
+        verbose: int = 1,
+    ):
+        super().__init__(verbose)
+        self.save_freq = save_freq
+        self.scenario = scenario
+        self.models_dir = models_dir
+        self.vec_env = vec_env
+        self.initial_lr = initial_lr
+        self.lr_schedule = lr_schedule
+        self.total_timesteps = total_timesteps
+        self.eval_episodes = eval_episodes
+        self.last_saved_step = 0
+
+    def _on_step(self) -> bool:
+        current_step = self.num_timesteps
+        if current_step - self.last_saved_step >= self.save_freq:
+            self.last_saved_step = current_step
+            ckpt_name = f"ppo_{self.scenario}_{current_step}_steps.zip"
+            ckpt_path = os.path.join(self.models_dir, ckpt_name)
+            self.model.save(ckpt_path)
+
+            if self.vec_env is not None:
+                vec_path = ckpt_path.replace(".zip", "_vecnormalize.pkl")
+                self.vec_env.save(vec_path)
+
+            # Calculate current LR
+            if self.lr_schedule == "linear":
+                progress_remaining = max(0.0, 1.0 - (current_step / max(1, self.total_timesteps)))
+                curr_lr = self.initial_lr * progress_remaining
+            else:
+                curr_lr = self.initial_lr
+
+            try:
+                evaluate_checkpoint_progress(
+                    checkpoint_path=ckpt_path,
+                    scenario=self.scenario,
+                    algorithm="PPO",
+                    step=current_step,
+                    learning_rate=curr_lr,
+                    num_episodes=self.eval_episodes,
+                    deterministic=True,
+                )
+            except Exception as e:
+                print(f"[PPOProgressLoggingCallback] Warning during checkpoint eval: {e}")
+
+        return True
 
 
 def linear_schedule(initial_value: float) -> Callable[[float], float]:
@@ -81,8 +145,28 @@ def run_ppo_training(
             )
 
         print(f"\n3. Starting PPO Training for {timesteps} steps...")
+        checkpoint_cb = CheckpointCallback(
+            save_freq=100_000,
+            save_path=models_dir,
+            name_prefix=f"ppo_{scenario}",
+        )
+        progress_cb = PPOProgressLoggingCallback(
+            save_freq=100_000,
+            scenario=scenario,
+            models_dir=models_dir,
+            vec_env=env,
+            initial_lr=initial_lr,
+            lr_schedule=lr_schedule,
+            total_timesteps=timesteps,
+            eval_episodes=max(10, eval_episodes),
+        )
+
         start_time = time.time()
-        model.learn(total_timesteps=timesteps, reset_num_timesteps=not bool(resume_path))
+        model.learn(
+            total_timesteps=timesteps,
+            reset_num_timesteps=not bool(resume_path),
+            callback=[checkpoint_cb, progress_cb],
+        )
         duration = time.time() - start_time
         fps = timesteps / max(0.001, duration)
 
@@ -96,6 +180,21 @@ def run_ppo_training(
         vec_save_path = checkpoint_path.replace(".zip", "_vecnormalize.pkl")
         env.save(vec_save_path)
         print("   ✓ Checkpoint and VecNormalize statistics saved successfully.")
+
+        # Final evaluation row logging to CSV
+        final_lr = initial_lr * (0.0 if lr_schedule == "linear" else 1.0)
+        try:
+            evaluate_checkpoint_progress(
+                checkpoint_path=checkpoint_path,
+                scenario=scenario,
+                algorithm="PPO",
+                step=timesteps,
+                learning_rate=final_lr,
+                num_episodes=eval_episodes,
+                deterministic=True,
+            )
+        except Exception as e:
+            print(f"[Notice] Final checkpoint evaluation: {e}")
 
         # Verify loading model
         print("\n5. Testing Model Loading from Checkpoint...")

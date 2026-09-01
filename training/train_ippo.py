@@ -10,19 +10,32 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import numpy as np
 import supersuit as ss
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from training.gmn_pettingzoo import GMNMultiAgentEnv
+from training.eval_progress import evaluate_checkpoint_progress, persist_trend_snapshots
 
 
 class IPPORewardLoggingCallback(BaseCallback):
     """
-    Logs reward trends, episode outcomes, and rolling performance across multi-agent rollouts.
+    Logs reward trends, episode outcomes, and rolling performance across multi-agent rollouts,
+    and runs evaluation at 100k step milestone checkpoints.
     """
 
-    def __init__(self, check_freq_steps: int = 10000, verbose: int = 1):
+    def __init__(
+        self,
+        check_freq_steps: int = 10000,
+        milestone_freq_steps: int = 100000,
+        scenario: str = "academy_3_vs_1_with_keeper",
+        models_dir: str = "training/models",
+        verbose: int = 1,
+    ):
         super().__init__(verbose)
         self.check_freq_steps = check_freq_steps
+        self.milestone_freq_steps = milestone_freq_steps
+        self.scenario = scenario
+        self.models_dir = models_dir
         self.last_check_step = 0
+        self.last_milestone_step = 0
         self.episode_rewards: List[float] = []
         self.episode_lengths: List[int] = []
         self.episode_goals: List[int] = []
@@ -72,6 +85,25 @@ class IPPORewardLoggingCallback(BaseCallback):
                     f"Rolling Mean Reward (last 50): {mean_rew:+.4f} | "
                     f"Rolling Goal Rate: {goal_pct:5.1f}%"
                 )
+
+        # 100k Milestone checkpoint save & persistent evaluation
+        if current_step - self.last_milestone_step >= self.milestone_freq_steps:
+            self.last_milestone_step = current_step
+            ckpt_name = f"ippo_{self.scenario}_{current_step}_steps.zip"
+            ckpt_path = os.path.join(self.models_dir, ckpt_name)
+            self.model.save(ckpt_path)
+            try:
+                evaluate_checkpoint_progress(
+                    checkpoint_path=ckpt_path,
+                    scenario=self.scenario,
+                    algorithm="IPPO",
+                    step=current_step,
+                    learning_rate=3e-4,
+                    num_episodes=50,
+                    deterministic=True,
+                )
+            except Exception as e:
+                print(f"[IPPORewardLoggingCallback] Checkpoint eval notice: {e}")
 
         return True
 
@@ -130,11 +162,22 @@ def run_ippo_training(timesteps: int = 200000, checkpoint_name: str = None) -> b
         )
 
         check_freq = 1000 if is_smoke_test else 10000
-        callback = IPPORewardLoggingCallback(check_freq_steps=check_freq, verbose=1)
+        callback = IPPORewardLoggingCallback(
+            check_freq_steps=check_freq,
+            milestone_freq_steps=100000,
+            scenario="academy_3_vs_1_with_keeper",
+            models_dir=models_dir,
+            verbose=1,
+        )
+        checkpoint_cb = CheckpointCallback(
+            save_freq=100_000,
+            save_path=models_dir,
+            name_prefix="ippo_academy_3_vs_1_with_keeper",
+        )
 
         print(f"\n3. Starting Multi-Agent IPPO Training for {timesteps} steps...")
         start_time = time.time()
-        model.learn(total_timesteps=timesteps, callback=callback)
+        model.learn(total_timesteps=timesteps, callback=[checkpoint_cb, callback])
         duration = time.time() - start_time
         fps = timesteps / max(0.001, duration)
 
@@ -145,6 +188,28 @@ def run_ippo_training(timesteps: int = 200000, checkpoint_name: str = None) -> b
         print(f"\n4. Saving Multi-Agent Model Checkpoint to: {checkpoint_path}...")
         model.save(checkpoint_path)
         print(f"   ✓ Checkpoint saved successfully. File exists: {os.path.exists(checkpoint_path)} (size: {os.path.getsize(checkpoint_path)} bytes)")
+
+        # Persist Trend Snapshots
+        if callback.trend_snapshots:
+            persist_trend_snapshots(
+                callback.trend_snapshots,
+                algorithm="IPPO",
+                scenario="academy_3_vs_1_with_keeper",
+            )
+
+        # End of run milestone evaluation
+        try:
+            evaluate_checkpoint_progress(
+                checkpoint_path=checkpoint_path,
+                scenario="academy_3_vs_1_with_keeper",
+                algorithm="IPPO",
+                step=timesteps,
+                learning_rate=3e-4,
+                num_episodes=50,
+                deterministic=True,
+            )
+        except Exception as e:
+            print(f"[Notice] End of run IPPO eval notice: {e}")
 
         # Print Reward Progression Trend Summary
         print("\n5. Training Reward & Performance Trend Summary:")
