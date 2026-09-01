@@ -2,13 +2,19 @@
 GMN-Football-3 — Multi-Agent Generalization Evaluation Harness (Step 1)
 Evaluates whether trained MAPPO policies generalize to varied opponent defensive formations
 and goalkeeper arrangements, or whether they have overfitted / memorized fixed positions.
+
+NOTE: This script requires a running local TypeScript engine (npx tsx training/bridge_server.ts)
+and must be executed on the user's local machine with active WebSocket bridge connection.
 """
 
 import argparse
 import csv
+import datetime
+import getpass
 import os
+import platform
 import sys
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
 import numpy as np
 import torch
 
@@ -35,7 +41,7 @@ def evaluate_variation(
     scenario_code: str,
     num_episodes: int = 50,
     base_seed: int = 500000,
-) -> Dict[str, float]:
+) -> Tuple[Dict[str, Any], int]:
     """Runs deterministic evaluation of frozen policy on a specific scenario variation."""
     env = GMNMultiAgentEnv(scenario=scenario_code, auto_start_bridge=True)
     controllable_agents = list(env.possible_agents)
@@ -43,6 +49,7 @@ def evaluate_variation(
     rewards_list = []
     lengths_list = []
     goals_list = []
+    total_steps_executed = 0
 
     for ep in range(1, num_episodes + 1):
         ep_seed = base_seed + ep
@@ -61,6 +68,7 @@ def evaluate_variation(
 
             action_dict = {a: int(actions[i].item()) for i, a in enumerate(current_agents)}
             obs_dict, rewards, terminations, truncations, infos = env.step(action_dict)
+            total_steps_executed += 1
 
             shared_rew = float(rewards[current_agents[0]]) if current_agents and current_agents[0] in rewards else 0.0
             ep_reward += shared_rew
@@ -101,7 +109,7 @@ def evaluate_variation(
         "mean_length": mean_len,
         "goals_count": int(sum(goals_list)),
         "episodes": num_episodes,
-    }
+    }, total_steps_executed
 
 
 def run_generalization_suite(
@@ -114,11 +122,18 @@ def run_generalization_suite(
     if variations is None:
         variations = ["baseline", "defender_2", "defender_3", "keeper_aggressive", "shifted", "randomized"]
 
+    provenance_host = platform.node()
+    provenance_user = getpass.getuser()
+    provenance_date = datetime.datetime.now().isoformat()
+    provenance_cmd = " ".join(sys.argv)
+    provenance_str = f"host={provenance_host}|user={provenance_user}|date={provenance_date}|cmd={provenance_cmd}"
+
     print("================================================================================")
     print("GMN-FOOTBALL-3 — MAPPO GENERALIZATION BENCHMARK SUITE")
     print(f"Checkpoint : {checkpoint_path}")
     print(f"Variations : {', '.join(variations)}")
     print(f"Episodes   : {num_episodes} per variation (Deterministic Seeds {base_seed + 1}..{base_seed + num_episodes})")
+    print(f"Provenance : {provenance_str}")
     print("================================================================================")
 
     if not os.path.exists(checkpoint_path):
@@ -134,11 +149,13 @@ def run_generalization_suite(
 
     results = []
     baseline_goal_rate = None
+    suite_total_steps = 0
 
     for var_name in variations:
         scenario_code = VARIATION_SCENARIO_MAP.get(var_name, var_name)
         print(f"\n>> Evaluating variation: '{var_name}' (Scenario: {scenario_code})...")
-        res = evaluate_variation(actor, var_name, scenario_code, num_episodes, base_seed)
+        res, var_steps = evaluate_variation(actor, var_name, scenario_code, num_episodes, base_seed)
+        suite_total_steps += var_steps
         
         if var_name == "baseline" or baseline_goal_rate is None:
             baseline_goal_rate = res["goal_rate"]
@@ -146,13 +163,21 @@ def run_generalization_suite(
         drop = baseline_goal_rate - res["goal_rate"]
         res["generalization_drop"] = drop
         res["checkpoint"] = os.path.basename(checkpoint_path)
+        res["provenance"] = provenance_str
         results.append(res)
 
         print(
             f"   Result: Goal Rate = {res['goal_rate']:5.1f}% | "
             f"Reward = {res['mean_reward']:+.3f} ± {res['std_reward']:.3f} | "
             f"Length = {res['mean_length']:.1f} | "
-            f"Gen Drop = {drop:+5.1f}%"
+            f"Gen Drop = {drop:+5.1f}% | Steps: {var_steps}"
+        )
+
+    # Runtime Guard: Refuse to write output if zero steps were executed
+    if suite_total_steps == 0:
+        raise RuntimeError(
+            "[Runtime Guard Error] Zero environment steps were executed during generalization evaluation. "
+            "Refusing to write fake or unmeasured rows. Ensure the local TypeScript bridge is actively serving."
         )
 
     # Save to CSV
@@ -168,9 +193,9 @@ def run_generalization_suite(
         "std_reward",
         "mean_length",
         "goals_count",
+        "provenance",
     ]
     
-    file_exists = os.path.exists(output_csv)
     with open(output_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -189,13 +214,16 @@ def run_generalization_suite(
             f"{r['mean_reward']:>+7.3f} ± {r['std_reward']:<5.3f} | {r['mean_length']:>8.1f}"
         )
     print("================================================================================")
-    print(f"Results written to: {output_csv}\n")
+    print(f"Results written with provenance to: {output_csv}\n")
 
     return results
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate MAPPO generalization across opponent variations.")
+    parser = argparse.ArgumentParser(
+        description="Evaluate MAPPO generalization across opponent variations. "
+                    "NOTE: Requires local TypeScript engine execution (npx tsx training/bridge_server.ts)."
+    )
     parser.add_argument(
         "--checkpoint",
         type=str,

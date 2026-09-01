@@ -79,7 +79,7 @@ def run_mappo_training(
     print(f"   Critic Architecture: Permutation-Invariant Deep Sets Pooling (O(1) parameter scaling)")
 
     actor = SharedActor(obs_dim=obs_dim, action_dim=action_dim, hidden=64)
-    critic = CentralizedCritic(obs_dim=obs_dim, hidden=64, global_state_dim=global_state_dim)
+    critic = CentralizedCritic(obs_dim=obs_dim, hidden=64, mode="pool")
 
     actor_opt = torch.optim.Adam(actor.parameters(), lr=3e-4)
     critic_opt = torch.optim.Adam(critic.parameters(), lr=3e-4)
@@ -299,7 +299,7 @@ def run_mappo_training(
     print("\n7. Verifying Checkpoint Reload Smoke Test...", flush=True)
     loaded_checkpoint = torch.load(checkpoint_path, map_location="cpu")
     eval_actor = SharedActor(obs_dim=obs_dim, action_dim=action_dim, hidden=64)
-    eval_critic = CentralizedCritic(global_state_dim=global_state_dim, hidden=64)
+    eval_critic = CentralizedCritic(obs_dim=obs_dim, hidden=64, mode="pool")
 
     eval_actor.load_state_dict(loaded_checkpoint["actor"])
     eval_critic.load_state_dict(loaded_checkpoint["critic"])
@@ -310,8 +310,8 @@ def run_mappo_training(
     dummy_obs = torch.zeros((num_agents, obs_dim), dtype=torch.float32)
     dummy_dist = eval_actor(dummy_obs)
     dummy_act = dummy_dist.sample()
-    dummy_global = torch.zeros((1, global_state_dim), dtype=torch.float32)
-    dummy_val = eval_critic(dummy_global)
+    dummy_joint = torch.zeros((1, num_agents, obs_dim), dtype=torch.float32)
+    dummy_val = eval_critic(dummy_joint)
 
     assert dummy_act.shape == (num_agents,), f"Dummy action shape mismatch: {dummy_act.shape}"
     assert dummy_val.shape == (1,), f"Dummy value shape mismatch: {dummy_val.shape}"

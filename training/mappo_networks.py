@@ -41,57 +41,77 @@ class CentralizedCritic(nn.Module):
     2. Deep Sets Pooling: Permutation-invariant dual (mean + max) pooling over agents -> (128).
     3. Joint Value Head: MLP mapping pooled representation -> scalar team state-value V(s).
     """
-    def __init__(self, obs_dim: int = 127, hidden: int = 64, global_state_dim: int = None):
+    def __init__(
+        self,
+        obs_dim: int = 127,
+        hidden: int = 64,
+        mode: str = "pool",
+        global_state_dim: int = None,
+    ):
         super().__init__()
         self.obs_dim = obs_dim
         self.hidden = hidden
+        self.mode = mode
         self.global_state_dim = global_state_dim or (obs_dim * 3)
 
-        # Scalable permutation-invariant set aggregation architecture (default)
-        self.agent_encoder = nn.Sequential(
-            nn.Linear(obs_dim, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, hidden),
-            nn.Tanh(),
-        )
-        self.pooled_value_head = nn.Sequential(
-            nn.Linear(hidden * 2, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, 1),
-        )
-
-        # Legacy flat MLP net (retained for backward compatibility)
-        self.flat_net = nn.Sequential(
-            nn.Linear(self.global_state_dim, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, 1),
-        )
+        if self.mode == "pool":
+            # Scalable permutation-invariant set aggregation architecture (default)
+            self.agent_encoder = nn.Sequential(
+                nn.Linear(obs_dim, hidden),
+                nn.Tanh(),
+                nn.Linear(hidden, hidden),
+                nn.Tanh(),
+            )
+            self.pooled_value_head = nn.Sequential(
+                nn.Linear(hidden * 2, hidden),
+                nn.Tanh(),
+                nn.Linear(hidden, 1),
+            )
+            self.flat_net = None
+        else:
+            # Legacy flat MLP net (retained for explicit flat mode)
+            self.agent_encoder = None
+            self.pooled_value_head = None
+            self.flat_net = nn.Sequential(
+                nn.Linear(self.global_state_dim, hidden),
+                nn.Tanh(),
+                nn.Linear(hidden, hidden),
+                nn.Tanh(),
+                nn.Linear(hidden, 1),
+            )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass. Accepts:
-        - 3D tensor of shape (batch, num_agents, obs_dim) -> runs Deep Sets invariant pooling
-        - 2D tensor of shape (batch, num_agents * obs_dim) -> reshapes and runs invariant pooling
-        - 2D tensor of shape (batch, global_state_dim) -> fallback to flat net if pooling shape differs
+        Forward pass.
+        - In 'pool' mode (default):
+            - 3D tensor of shape (batch, num_agents, obs_dim): invariant Deep Sets pooling across agents.
+            - 2D tensor of shape (num_agents, obs_dim): unbatched input; unsqueezed to (1, num_agents, obs_dim).
+            - 2D tensor of shape (batch, num_agents * obs_dim): reshapes to 3D and pools.
+        - In 'flat' mode:
+            - Passes through flat_net.
         """
-        if x.dim() == 3:
-            emb = self.agent_encoder(x)
-            mean_pool = emb.mean(dim=1)
-            max_pool = emb.max(dim=1)[0]
-            joint = torch.cat([mean_pool, max_pool], dim=-1)
-            return self.pooled_value_head(joint).squeeze(-1)
+        if self.mode == "flat":
+            if self.flat_net is None:
+                raise RuntimeError("CentralizedCritic initialized in pool mode cannot run flat forward pass")
+            return self.flat_net(x).squeeze(-1)
 
-        # If 2D tensor divisible by obs_dim, reshape to (batch, num_agents, obs_dim) and use invariant pooling
-        if x.dim() == 2 and x.shape[-1] % self.obs_dim == 0:
-            b = x.shape[0]
-            reshaped = x.view(b, -1, self.obs_dim)
-            emb = self.agent_encoder(reshaped)
-            mean_pool = emb.mean(dim=1)
-            max_pool = emb.max(dim=1)[0]
-            joint = torch.cat([mean_pool, max_pool], dim=-1)
-            return self.pooled_value_head(joint).squeeze(-1)
+        # 'pool' mode
+        if x.dim() == 2:
+            if x.shape[-1] == self.obs_dim:
+                # Unbatched (num_agents, obs_dim) -> (1, num_agents, obs_dim)
+                x = x.unsqueeze(0)
+            elif x.shape[-1] % self.obs_dim == 0:
+                # Batched flat representation (batch, num_agents * obs_dim) -> reshape to 3D
+                b = x.shape[0]
+                x = x.view(b, -1, self.obs_dim)
+            else:
+                raise ValueError(
+                    f"Expected 2D input with last dim {self.obs_dim} or divisible by {self.obs_dim}, got shape {x.shape}"
+                )
 
-        # Fallback to flat net
-        return self.flat_net(x).squeeze(-1)
+        emb = self.agent_encoder(x)  # (batch, num_agents, hidden)
+        mean_pool = emb.mean(dim=1)  # (batch, hidden)
+        max_pool = emb.max(dim=1)[0]  # (batch, hidden)
+        joint = torch.cat([mean_pool, max_pool], dim=-1)  # (batch, hidden * 2)
+        return self.pooled_value_head(joint).squeeze(-1)
+

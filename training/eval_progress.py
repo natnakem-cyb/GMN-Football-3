@@ -7,6 +7,9 @@ at 100k milestone increments, appending deterministic evaluation metrics to win_
 import os
 import sys
 import csv
+import datetime
+import getpass
+import platform
 from typing import Dict, Any, Optional
 import numpy as np
 
@@ -30,6 +33,7 @@ CSV_FIELDNAMES = [
     "episodes",
     "deterministic",
     "checkpoint_path",
+    "provenance",
 ]
 
 
@@ -390,6 +394,12 @@ def evaluate_checkpoint_progress(
     else:
         raise ValueError(f"Unknown algorithm: {algorithm}. Expected PPO, IPPO, or MAPPO.")
 
+    provenance_host = platform.node()
+    provenance_user = getpass.getuser()
+    provenance_date = datetime.datetime.now().isoformat()
+    provenance_cmd = " ".join(sys.argv)
+    provenance_str = f"host={provenance_host}|user={provenance_user}|date={provenance_date}|cmd={provenance_cmd}"
+
     row = {
         "scenario": scenario,
         "algorithm": algo_upper,
@@ -403,6 +413,7 @@ def evaluate_checkpoint_progress(
         "episodes": num_episodes,
         "deterministic": deterministic,
         "checkpoint_path": checkpoint_path,
+        "provenance": provenance_str,
     }
 
     append_progress_row(csv_path, row)
