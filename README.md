@@ -673,29 +673,14 @@ The current learning path is:
          ObservationEncoder
 ```
 
-`training/gmn_gym.py` provides the standard Gymnasium environment lifecycle and validates the 115-dimensional observation and 19-action contract.
+`training/gmn_gym.py` provides the standard Gymnasium environment lifecycle and validates the 127-dimensional observation and 19-action contract.
 
-## Current RL mode
+## RL Modes
 
-The primary implemented learning path is **single-agent PPO**.
+- **Single-Agent PPO**: `training/train_ppo.py` for single controlled agent curriculum scenarios.
+- **Multi-Agent MAPPO**: `training/train_mappo.py` using a Deep Sets centralized critic with permutation-invariant dual aggregation (`[mean_pool, max_pool]`).
+- **IPPO (Deprecated)**: IPPO is deprecated and superseded by MAPPO; root cause analysis is documented in `training/ippo_credit_assignment_report.md`.
 
-## Future RL mode
-
-The architecture is intended to support:
-
-```text
-shared policy
-      ↓
-multiple learned players
-      ↓
-centralized critic
-      ↓
-self-play
-      ↓
-historical opponents
-      ↓
-11-vs-11
-```
 
 ---
 

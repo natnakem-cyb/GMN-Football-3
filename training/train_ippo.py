@@ -1,3 +1,8 @@
+"""
+DEPRECATED — IPPO is superseded by MAPPO; root cause documented in
+`training/ippo_credit_assignment_report.md`. Do not use for new training.
+"""
+
 import argparse
 import os
 import sys
@@ -13,6 +18,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from training.gmn_pettingzoo import GMNMultiAgentEnv
 from training.eval_progress import evaluate_checkpoint_progress, persist_trend_snapshots
+
 
 
 class IPPORewardLoggingCallback(BaseCallback):
@@ -109,6 +115,7 @@ class IPPORewardLoggingCallback(BaseCallback):
 
 
 def run_ippo_training(timesteps: int = 200000, checkpoint_name: str = None, resume_path: str = None) -> bool:
+    print("\n[DEPRECATED] Warning: IPPO is deprecated and superseded by MAPPO. Refer to training/ippo_credit_assignment_report.md.")
     is_smoke_test = timesteps < 50000
     if checkpoint_name is None:
         checkpoint_name = (
