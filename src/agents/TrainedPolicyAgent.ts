@@ -6,6 +6,19 @@ import { MAPPO_WEIGHTS } from './mappo_weights';
 
 const SQRT_HALF = 0.7071067811865476;
 
+/**
+ * Assert that MAPPO_WEIGHTS matches the current OBSERVATION_DIM (127 floats).
+ * Throws a clear runtime error if the embedded weights were exported from a legacy checkpoint.
+ */
+export function assertMappoWeightsValid(): void {
+  const expectedW0Len = 64 * OBSERVATION_DIM;
+  if (MAPPO_WEIGHTS.w0.length !== expectedW0Len || MAPPO_WEIGHTS.w0.length % OBSERVATION_DIM !== 0) {
+    throw new Error(
+      `[TrainedPolicyAgent] Weight/OBSERVATION_DIM mismatch: w0.length=${MAPPO_WEIGHTS.w0.length}, expected ${expectedW0Len}. Re-export weights from a 127-dim checkpoint (see training/export_onnx.py).`
+    );
+  }
+}
+
 export class TrainedPolicyAgent implements IAgent {
   id: string;
   name = 'PPO Neural Policy Agent (Trained, MAPPO)';
@@ -14,6 +27,7 @@ export class TrainedPolicyAgent implements IAgent {
   private lastAction: AgentAction = { type: ActionType.IDLE };
 
   private constructor(id: string) {
+    assertMappoWeightsValid();
     this.id = id;
   }
 
@@ -24,6 +38,7 @@ export class TrainedPolicyAgent implements IAgent {
     _modelSource: string | ArrayBuffer | Uint8Array = '/models/mappo_policy.onnx',
     id = 'trained_ppo'
   ): Promise<TrainedPolicyAgent> {
+    assertMappoWeightsValid();
     const agent = new TrainedPolicyAgent(id);
     return agent;
   }
@@ -70,13 +85,26 @@ export class TrainedPolicyAgent implements IAgent {
    * Layer 2: Linear(64, 19) -> Logits
    */
   private computeForwardMath(obs: number[]): number[] {
+    assertMappoWeightsValid();
     const { w0, b0, w1, b1, w2, b2 } = MAPPO_WEIGHTS;
+
+    // Defensive check: ensure full row capacity for Layer 0
+    if (w0.length < 64 * OBSERVATION_DIM) {
+      throw new Error(
+        `[TrainedPolicyAgent] Weight buffer underflow: w0.length=${w0.length} < 64 * OBSERVATION_DIM (${64 * OBSERVATION_DIM})`
+      );
+    }
 
     // Layer 0: Linear(OBSERVATION_DIM, 64) -> Tanh
     const h0 = new Float32Array(64);
     for (let i = 0; i < 64; i++) {
       let sum = b0[i];
       const offset = i * OBSERVATION_DIM;
+      if (w0.length < offset + OBSERVATION_DIM) {
+        throw new Error(
+          `[TrainedPolicyAgent] Row offset out of bounds: w0.length=${w0.length} < ${offset + OBSERVATION_DIM}`
+        );
+      }
       for (let j = 0; j < OBSERVATION_DIM; j++) {
         sum += w0[offset + j] * obs[j];
       }

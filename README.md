@@ -681,6 +681,24 @@ The current learning path is:
 - **Multi-Agent MAPPO**: `training/train_mappo.py` using a Deep Sets centralized critic with permutation-invariant dual aggregation (`[mean_pool, max_pool]`).
 - **IPPO (Deprecated)**: IPPO is deprecated and superseded by MAPPO; root cause analysis is documented in `training/ippo_credit_assignment_report.md`.
 
+### Regenerating Browser Neural Policy Weights (Requires Local Run)
+
+The environment's observation contract migrated from 115 dimensions to 127 dimensions to support explicit per-agent role one-hot channels. Existing checkpoints in `training/models/` (`mappo_academy_3_vs_1_with_keeper_trained.pt`) were trained under the legacy 115-dim contract.
+
+To regenerate weights compatible with the current browser runtime, execute the following commands in your local training environment:
+
+```bash
+# 1. Retrain to produce a 127-dim checkpoint (obs_dim now 127 after the role-channel migration)
+python3 training/train_mappo.py --scenario academy_3_vs_1_with_keeper --timesteps 200000
+
+# 2. Re-export both ONNX and the browser weights from the NEW checkpoint
+python3 training/export_onnx.py --checkpoint training/models/mappo_academy_3_vs_1_with_keeper_trained.pt
+```
+
+> **Note**: Until Step 1 and 2 are executed in a local training run, `src/agents/mappo_weights.ts` contains legacy 115-dim weights. Runtime shape assertions in `TrainedPolicyAgent.ts` and `export_onnx.py` will actively block execution and fall back safely to Tactical Rule AI to prevent silent NaN logits.
+>
+> **Team B / Right-Side Neural Mirroring**: Neural policies are currently trained strictly for Left-side attackers targeting the Right goal. Right-team neural play (mirroring coordinates/actions) is planned future work.
+
 
 ---
 

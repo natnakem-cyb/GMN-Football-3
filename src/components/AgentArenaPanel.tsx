@@ -83,11 +83,11 @@ export const AgentArenaPanel: React.FC<AgentArenaPanelProps> = ({
                 <option value="rule_based">🤖 Tactical Rule AI</option>
                 {is3v1Scenario ? (
                   <option value="neural">
-                    🧠 PPO Neural Policy Agent (Trained MAPPO)
+                    🧠 Neural Policy (Trained — Academy 3v1, Left side)
                   </option>
                 ) : (
                   <option value="neural" disabled>
-                    🧠 PPO Neural Policy (Trained MAPPO — Only for Academy 3 vs 1)
+                    🧠 Neural Policy (not trained for this scenario)
                   </option>
                 )}
                 <option value="heuristic">📊 Heuristic Bot (Untrained Baseline)</option>
@@ -153,7 +153,13 @@ export const AgentArenaPanel: React.FC<AgentArenaPanelProps> = ({
                 <option value="heuristic">📊 Heuristic Bot (Untrained Baseline)</option>
                 <option value="human">👤 Human Player</option>
                 <option value="scripted">📜 Scripted Scenario Bot</option>
+                <option value="neural" disabled title="Trained policy is left-side only (trained to attack the right goal)">
+                  🧠 Neural Policy (Left-side only, no mirroring)
+                </option>
               </select>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Neural policy is left-side only (trained to attack the right goal).
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">

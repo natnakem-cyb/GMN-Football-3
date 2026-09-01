@@ -45,6 +45,7 @@ export default function App() {
   const neuralAgentRef = useRef<NeuralHeuristicAgent>(new NeuralHeuristicAgent());
   const trainedAgentRef = useRef<TrainedPolicyAgent | null>(null);
   const scriptedAgentRef = useRef<ScriptedScenarioAgent>(new ScriptedScenarioAgent());
+  const warnedNeuralFallbackRef = useRef<boolean>(false);
 
   const [activeTab, setActiveTab] = useState<TabType>('arena');
   const [isPlaying, setIsPlaying] = useState(true);
@@ -136,7 +137,14 @@ export default function App() {
               if (isLeft && trainedAgentRef.current && is3v1Scenario) {
                 action = trainedAgentRef.current.decide(context);
               } else {
-                action = neuralAgentRef.current.decide(context);
+                if (!warnedNeuralFallbackRef.current) {
+                  console.warn(
+                    `[controller=neural] fallback: no valid trained policy for team=${player.team}, scenario=${engine.activeScenario?.id ?? 'custom'}; using rule_based`
+                  );
+                  warnedNeuralFallbackRef.current = true;
+                }
+                const ruleAgent = isLeft ? ruleAgentLeftRef.current : ruleAgentRightRef.current;
+                action = ruleAgent.decide(context);
               }
             } else if (teamConfig.controller === 'heuristic') {
               action = neuralAgentRef.current.decide(context);
@@ -196,7 +204,14 @@ export default function App() {
         if (isLeft && trainedAgentRef.current && is3v1Scenario) {
           action = trainedAgentRef.current.decide(context);
         } else {
-          action = neuralAgentRef.current.decide(context);
+          if (!warnedNeuralFallbackRef.current) {
+            console.warn(
+              `[controller=neural] fallback: no valid trained policy for team=${player.team}, scenario=${engine.activeScenario?.id ?? 'custom'}; using rule_based`
+            );
+            warnedNeuralFallbackRef.current = true;
+          }
+          const ruleAgent = isLeft ? ruleAgentLeftRef.current : ruleAgentRightRef.current;
+          action = ruleAgent.decide(context);
         }
       } else if (teamConfig.controller === 'heuristic') {
         action = neuralAgentRef.current.decide(context);
