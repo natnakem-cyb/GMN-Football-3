@@ -49,10 +49,11 @@ const actions = [5, 5, 5, 5, 5, 13, 13, 13, 13, 13, 5, 5, 12, 0, 0, 16, 17, 18, 
 
 let allPassed = true;
 
-for (const sc of ['academy_empty_goal', 'academy_run_to_score', 'academy_pass_and_shoot_with_keeper']) {
+for (const sc of ['academy_empty_goal', 'academy_run_to_score', 'academy_pass_and_shoot_with_keeper', 'academy_3_vs_1_with_keeper']) {
   console.log(`\nTesting scenario: ${sc} (Seed 424242)...`);
   const run1 = runSeededSimulation(sc, 424242, actions);
   const run2 = runSeededSimulation(sc, 424242, actions);
+  const runOtherSeed = runSeededSimulation(sc, 999999, actions);
 
   let scenarioMatch = true;
   let maxDiff = 0;
@@ -79,8 +80,18 @@ for (const sc of ['academy_empty_goal', 'academy_run_to_score', 'academy_pass_an
     }
   }
 
-  if (scenarioMatch && maxDiff === 0) {
-    console.log(`  ✓ ${sc}: 100% bitwise trajectory determinism confirmed (max diff: ${maxDiff}).`);
+  // Verify that different seeds produce distinct initial positions
+  let diffWithOtherSeed = 0;
+  for (let d = 0; d < run1.observations[0].length; d++) {
+    diffWithOtherSeed += Math.abs(run1.observations[0][d] - runOtherSeed.observations[0][d]);
+  }
+  if (diffWithOtherSeed === 0) {
+    console.error(`  ✗ ${sc}: Warning - seed 424242 and 999999 produced identical initial states.`);
+    scenarioMatch = false;
+  }
+
+  if (scenarioMatch && maxDiff === 0 && diffWithOtherSeed > 0) {
+    console.log(`  ✓ ${sc}: 100% bitwise trajectory determinism confirmed (max diff: ${maxDiff}, seed divergence: ${diffWithOtherSeed.toFixed(4)}).`);
   } else {
     console.error(`  ✗ ${sc}: Determinism check failed.`);
     allPassed = false;

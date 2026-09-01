@@ -35,6 +35,13 @@ export class SeededRNG {
   }
 
   /**
+   * Returns a pseudo-random float in [0, 1) or [min, max).
+   */
+  public nextFloat(min = 0, max = 1): number {
+    return min + this.next() * (max - min);
+  }
+
+  /**
    * Returns a pseudo-random integer in [min, max] inclusive.
    */
   public nextInt(min: number, max: number): number {

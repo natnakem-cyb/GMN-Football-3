@@ -257,20 +257,37 @@ export class GameEngine {
     this.currentPassTracking = null;
     this.gameMode = scenario.id.startsWith('academy') ? GameMode.Normal : GameMode.KickOff;
 
-    this.ball.position = { ...scenario.setup.ball };
+    const jitter = scenario.setup.positionJitter ?? 0;
+    if (jitter > 0) {
+      const ballJitterX = (this.rng.nextFloat() * 2 - 1) * jitter;
+      const ballJitterY = (this.rng.nextFloat() * 2 - 1) * jitter;
+      this.ball.position = {
+        x: Math.max(-0.95, Math.min(0.95, scenario.setup.ball.x + ballJitterX)),
+        y: Math.max(-0.40, Math.min(0.40, scenario.setup.ball.y + ballJitterY)),
+        z: scenario.setup.ball.z || 0,
+      };
+    } else {
+      this.ball.position = { ...scenario.setup.ball };
+    }
 
     // Setup left players (if empty, fallback to formation layout)
     if (scenario.setup.leftPlayers.length === 0 && scenario.teamLeftPlayers > 0) {
       const positions = getFormationPositions(this.teamLeftConfig.formation, 'left', scenario.teamLeftPlayers);
       positions.forEach((pData, idx) => {
+        let posX = pData.pos.x;
+        let posY = pData.pos.y;
+        if (jitter > 0) {
+          posX = Math.max(-0.95, Math.min(0.95, posX + (this.rng.nextFloat() * 2 - 1) * jitter));
+          posY = Math.max(-0.40, Math.min(0.40, posY + (this.rng.nextFloat() * 2 - 1) * jitter));
+        }
         const player: Player = {
           id: `left_${idx + 1}`,
           name: idx === 0 ? 'Goalkeeper A' : `Player #${idx + 1}`,
           number: idx + 1,
           team: 'left',
           role: pData.role,
-          position: { ...pData.pos },
-          targetPosition: { ...pData.pos },
+          position: { x: posX, y: posY },
+          targetPosition: { x: posX, y: posY },
           velocity: { x: 0, y: 0 },
           heading: 0,
           stamina: 100,
@@ -296,14 +313,20 @@ export class GameEngine {
       this.controlledPlayerId = defaultControllable ? defaultControllable.id : this.players[0]?.id || null;
     } else {
       scenario.setup.leftPlayers.forEach((pData, idx) => {
+        let posX = pData.pos.x;
+        let posY = pData.pos.y;
+        if (jitter > 0) {
+          posX = Math.max(-0.95, Math.min(0.95, posX + (this.rng.nextFloat() * 2 - 1) * jitter));
+          posY = Math.max(-0.40, Math.min(0.40, posY + (this.rng.nextFloat() * 2 - 1) * jitter));
+        }
         const player: Player = {
           id: `left_${idx + 1}`,
           name: `Trainee #${idx + 1}`,
           number: idx === 0 ? 10 : idx + 1,
           team: 'left',
           role: pData.role,
-          position: { ...pData.pos },
-          targetPosition: { ...pData.pos },
+          position: { x: posX, y: posY },
+          targetPosition: { x: posX, y: posY },
           velocity: { x: 0, y: 0 },
           heading: 0,
           stamina: 100,
@@ -335,14 +358,23 @@ export class GameEngine {
     if (scenario.setup.rightPlayers.length === 0 && scenario.teamRightPlayers > 0) {
       const positions = getFormationPositions(this.teamRightConfig.formation, 'right', scenario.teamRightPlayers);
       positions.forEach((pData, idx) => {
+        let posX = pData.pos.x;
+        let posY = pData.pos.y;
+        if (jitter > 0) {
+          const isGK = pData.role === 'GK';
+          const jx = (this.rng.nextFloat() * 2 - 1) * (isGK ? jitter * 0.3 : jitter);
+          const jy = (this.rng.nextFloat() * 2 - 1) * jitter;
+          posX = isGK ? Math.max(0.85, Math.min(0.98, posX + jx)) : Math.max(-0.95, Math.min(0.95, posX + jx));
+          posY = Math.max(-0.40, Math.min(0.40, posY + jy));
+        }
         const player: Player = {
           id: `right_${idx + 1}`,
           name: idx === 0 ? 'Goalkeeper B' : `Player #${idx + 1}`,
           number: idx + 1,
           team: 'right',
           role: pData.role,
-          position: { ...pData.pos },
-          targetPosition: { ...pData.pos },
+          position: { x: posX, y: posY },
+          targetPosition: { x: posX, y: posY },
           velocity: { x: 0, y: 0 },
           heading: Math.PI,
           stamina: 100,
@@ -366,14 +398,23 @@ export class GameEngine {
       });
     } else {
       scenario.setup.rightPlayers.forEach((pData, idx) => {
+        let posX = pData.pos.x;
+        let posY = pData.pos.y;
+        if (jitter > 0) {
+          const isGK = pData.role === 'GK';
+          const jx = (this.rng.nextFloat() * 2 - 1) * (isGK ? jitter * 0.3 : jitter);
+          const jy = (this.rng.nextFloat() * 2 - 1) * jitter;
+          posX = isGK ? Math.max(0.85, Math.min(0.98, posX + jx)) : Math.max(-0.95, Math.min(0.95, posX + jx));
+          posY = Math.max(-0.40, Math.min(0.40, posY + jy));
+        }
         const player: Player = {
           id: `right_${idx + 1}`,
           name: pData.role === 'GK' ? 'Academy Keeper' : `Opponent Defender #${idx + 1}`,
           number: idx === 0 ? 1 : idx + 2,
           team: 'right',
           role: pData.role,
-          position: { ...pData.pos },
-          targetPosition: { ...pData.pos },
+          position: { x: posX, y: posY },
+          targetPosition: { x: posX, y: posY },
           velocity: { x: 0, y: 0 },
           heading: Math.PI,
           stamina: 100,

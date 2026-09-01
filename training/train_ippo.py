@@ -108,7 +108,7 @@ class IPPORewardLoggingCallback(BaseCallback):
         return True
 
 
-def run_ippo_training(timesteps: int = 200000, checkpoint_name: str = None) -> bool:
+def run_ippo_training(timesteps: int = 200000, checkpoint_name: str = None, resume_path: str = None) -> bool:
     is_smoke_test = timesteps < 50000
     if checkpoint_name is None:
         checkpoint_name = (
@@ -120,6 +120,8 @@ def run_ippo_training(timesteps: int = 200000, checkpoint_name: str = None) -> b
     print("==================================================")
     print(f"GMN FOOTBALL — INDEPENDENT PPO (IPPO) {'SMOKE TEST' if is_smoke_test else 'REAL TRAINING RUN'}")
     print(f"Target Scenario: academy_3_vs_1_with_keeper | Timesteps: {timesteps}")
+    if resume_path:
+        print(f"Resuming From Checkpoint: {resume_path}")
     print("Architecture: Parameter-Sharing IPPO (SuperSuit + SB3)")
     print(f"Checkpoint Output: models/{checkpoint_name}")
     print("==================================================")
@@ -145,21 +147,25 @@ def run_ippo_training(timesteps: int = 200000, checkpoint_name: str = None) -> b
         vec_env.venv.seed = lambda seed=None: [None] * vec_env.num_envs
 
     try:
-        print("\n2. Configuring IPPO Model (MlpPolicy, gamma=0.99, n_steps=256, batch_size=64, lr=3e-4)...")
-        model = PPO(
-            policy="MlpPolicy",
-            env=vec_env,
-            learning_rate=3e-4,
-            n_steps=256,
-            batch_size=64,
-            n_epochs=4,
-            gamma=0.99,
-            gae_lambda=0.95,
-            clip_range=0.2,
-            verbose=1 if is_smoke_test else 0,
-            tensorboard_log=None,
-            seed=42,
-        )
+        if resume_path and os.path.exists(resume_path):
+            print(f"\n2. Loading IPPO Model from checkpoint: {resume_path}...")
+            model = PPO.load(resume_path, env=vec_env)
+        else:
+            print("\n2. Configuring IPPO Model (MlpPolicy, gamma=0.99, n_steps=256, batch_size=64, lr=3e-4)...")
+            model = PPO(
+                policy="MlpPolicy",
+                env=vec_env,
+                learning_rate=3e-4,
+                n_steps=256,
+                batch_size=64,
+                n_epochs=4,
+                gamma=0.99,
+                gae_lambda=0.95,
+                clip_range=0.2,
+                verbose=1 if is_smoke_test else 0,
+                tensorboard_log=None,
+                seed=42,
+            )
 
         check_freq = 1000 if is_smoke_test else 10000
         callback = IPPORewardLoggingCallback(
@@ -177,7 +183,11 @@ def run_ippo_training(timesteps: int = 200000, checkpoint_name: str = None) -> b
 
         print(f"\n3. Starting Multi-Agent IPPO Training for {timesteps} steps...")
         start_time = time.time()
-        model.learn(total_timesteps=timesteps, callback=[checkpoint_cb, callback])
+        model.learn(
+            total_timesteps=timesteps,
+            reset_num_timesteps=not bool(resume_path),
+            callback=[checkpoint_cb, callback],
+        )
         duration = time.time() - start_time
         fps = timesteps / max(0.001, duration)
 
@@ -305,8 +315,14 @@ if __name__ == "__main__":
         default=None,
         help="Custom output checkpoint filename (e.g. ippo_academy_3_vs_1_with_keeper_trained.zip)",
     )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Path to checkpoint (.zip) to resume training from",
+    )
 
     args = parser.parse_args()
     chosen_timesteps = args.timesteps if args.timesteps is not None else (args.steps if args.steps is not None else 200000)
-    success = run_ippo_training(timesteps=chosen_timesteps, checkpoint_name=args.checkpoint)
+    success = run_ippo_training(timesteps=chosen_timesteps, checkpoint_name=args.checkpoint, resume_path=args.resume)
     sys.exit(0 if success else 1)

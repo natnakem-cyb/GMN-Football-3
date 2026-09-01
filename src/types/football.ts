@@ -202,6 +202,7 @@ export interface ScenarioConfig {
     ball: Vector3D;
     leftPlayers: { role: PlayerRole; pos: Vector2D; isControlled?: boolean }[];
     rightPlayers: { role: PlayerRole; pos: Vector2D }[];
+    positionJitter?: number;
   };
   objectives: ScenarioObjective[];
   terminateOnOpponentPossession?: boolean;

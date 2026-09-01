@@ -39,6 +39,7 @@ def run_mappo_training(
     checkpoint_name: str = None,
     scenario: str = "academy_3_vs_1_with_keeper",
     seed: int = 42,
+    resume_path: str = None,
 ) -> bool:
     is_smoke_test = timesteps < 50000
     if checkpoint_name is None:
@@ -51,7 +52,9 @@ def run_mappo_training(
     print("==================================================")
     print(f"GMN FOOTBALL — MULTI-AGENT PPO (MAPPO) {'SMOKE TEST' if is_smoke_test else 'REAL TRAINING RUN'}")
     print(f"Target Scenario: {scenario} | Timesteps: {timesteps}")
-    print("Architecture: SharedActor (Mlp 64x64) + CentralizedCritic (Global State 345 -> 64x64 -> 1)")
+    if resume_path:
+        print(f"Resuming From Checkpoint: {resume_path}")
+    print("Architecture: SharedActor (Mlp 64x64) + CentralizedCritic (Global State / Set Pooling -> 1)")
     print(f"Checkpoint Output: models/{checkpoint_name}")
     print("==================================================")
 
@@ -75,18 +78,36 @@ def run_mappo_training(
     print(f"   Local Obs Dim: {obs_dim} | Global State Dim: {global_state_dim} | Action Dim: {action_dim}")
 
     actor = SharedActor(obs_dim=obs_dim, action_dim=action_dim, hidden=64)
-    critic = CentralizedCritic(global_state_dim=global_state_dim, hidden=64)
+    critic = CentralizedCritic(global_state_dim=global_state_dim, obs_dim=obs_dim, hidden=64)
 
     actor_opt = torch.optim.Adam(actor.parameters(), lr=3e-4)
     critic_opt = torch.optim.Adam(critic.parameters(), lr=3e-4)
 
+    total_steps_elapsed = 0
+    start_update = 1
+
+    if resume_path and os.path.exists(resume_path):
+        print(f"\n   -> Loading checkpoint state from: {resume_path}...")
+        ckpt = torch.load(resume_path, map_location="cpu")
+        if "actor" in ckpt:
+            actor.load_state_dict(ckpt["actor"])
+        if "critic" in ckpt:
+            critic.load_state_dict(ckpt["critic"])
+        if "actor_opt" in ckpt:
+            actor_opt.load_state_dict(ckpt["actor_opt"])
+        if "critic_opt" in ckpt:
+            critic_opt.load_state_dict(ckpt["critic_opt"])
+        total_steps_elapsed = int(ckpt.get("timesteps", 0))
+        print(f"   ✓ Checkpoint loaded successfully. Resuming from step {total_steps_elapsed}.")
+
     n_steps = 256
-    n_updates = timesteps // n_steps
+    remaining_timesteps = max(0, timesteps - total_steps_elapsed)
+    n_updates = remaining_timesteps // n_steps
     check_freq_steps = 1000 if is_smoke_test else 10000
 
     print(f"\n2. Configuration:")
     print(f"   Total Updates: {n_updates} ({n_steps} steps per rollout)")
-    print(f"   Total Timesteps: {n_updates * n_steps}")
+    print(f"   Remaining Timesteps: {n_updates * n_steps} (Total Target: {timesteps})")
     print(f"   PPO Epochs: 4 | Mini-batch: 64 | LR: 3e-4 | Clip: 0.2")
     print(f"   GAE: gamma=0.99, lambda=0.95 | Value Coef: 0.5 | Entropy Coef: 0.01")
 
@@ -97,14 +118,13 @@ def run_mappo_training(
     trend_snapshots: List[Tuple[int, int, float, float]] = []  # (step, num_eps, mean_rew, goal_rate)
     loss_history: List[Dict[str, Any]] = []
 
-    last_check_step = 0
-    last_checkpoint_step = 0
-    total_steps_elapsed = 0
+    last_check_step = total_steps_elapsed
+    last_checkpoint_step = (total_steps_elapsed // 100_000) * 100_000
 
-    print(f"\n3. Starting MAPPO Training for {timesteps} steps...")
+    print(f"\n3. Starting MAPPO Training for {remaining_timesteps} steps...")
     start_time = time.time()
 
-    for update_idx in range(1, n_updates + 1):
+    for update_idx in range(start_update, start_update + n_updates):
         # 1. Collect Rollout
         buffer = collect_rollout(env, actor, critic, num_steps=n_steps)
         total_steps_elapsed += n_steps
@@ -179,6 +199,8 @@ def run_mappo_training(
                 {
                     "actor": actor.state_dict(),
                     "critic": critic.state_dict(),
+                    "actor_opt": actor_opt.state_dict(),
+                    "critic_opt": critic_opt.state_dict(),
                     "obs_dim": obs_dim,
                     "global_state_dim": global_state_dim,
                     "action_dim": action_dim,
@@ -200,7 +222,7 @@ def run_mappo_training(
                 print(f"[Notice] MAPPO milestone eval notice: {e}")
 
     duration = time.time() - start_time
-    fps = total_steps_elapsed / max(0.001, duration)
+    fps = (total_steps_elapsed - (total_steps_elapsed - remaining_timesteps)) / max(0.001, duration)
     print(f"\n   ✓ MAPPO Training completed in {duration:.2f}s ({fps:.1f} steps/sec)", flush=True)
 
     # 4. Save model checkpoint
@@ -210,6 +232,8 @@ def run_mappo_training(
         {
             "actor": actor.state_dict(),
             "critic": critic.state_dict(),
+            "actor_opt": actor_opt.state_dict(),
+            "critic_opt": critic_opt.state_dict(),
             "obs_dim": obs_dim,
             "global_state_dim": global_state_dim,
             "action_dim": action_dim,
@@ -301,6 +325,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint-name", type=str, default=None, help="Output checkpoint filename (.pt)")
     parser.add_argument("--scenario", type=str, default="academy_3_vs_1_with_keeper", help="Scenario name")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint (.pt) to resume from")
     args = parser.parse_args()
 
     run_mappo_training(
@@ -308,4 +333,5 @@ if __name__ == "__main__":
         checkpoint_name=args.checkpoint_name,
         scenario=args.scenario,
         seed=args.seed,
+        resume_path=args.resume,
     )
