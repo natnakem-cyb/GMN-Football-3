@@ -45,7 +45,6 @@ export default function App() {
   const neuralAgentRef = useRef<NeuralHeuristicAgent>(new NeuralHeuristicAgent());
   const trainedAgentRef = useRef<TrainedPolicyAgent | null>(null);
   const scriptedAgentRef = useRef<ScriptedScenarioAgent>(new ScriptedScenarioAgent());
-  const warnedNeuralFallbackRef = useRef<boolean>(false);
 
   const [activeTab, setActiveTab] = useState<TabType>('arena');
   const [isPlaying, setIsPlaying] = useState(true);
@@ -56,6 +55,7 @@ export default function App() {
   const [replayFrameIndex, setReplayFrameIndex] = useState(0);
   const [isModelLoading, setIsModelLoading] = useState(true);
   const [modelError, setModelError] = useState<string | null>(null);
+  const [neuralFallbackActive, setNeuralFallbackActive] = useState(false);
 
   // Engine React State Bridge
   const [, setRenderTrigger] = useState(0);
@@ -74,7 +74,7 @@ export default function App() {
         }
       })
       .catch((err) => {
-        console.error('[TrainedPolicyAgent] Failed to load ONNX policy model:', err);
+        console.warn('[TrainedPolicyAgent] Neural policy checkpoint status:', err?.message || err);
         if (mounted) {
           setModelError(err?.message || 'Failed to load model');
           setIsModelLoading(false);
@@ -137,12 +137,8 @@ export default function App() {
               if (isLeft && trainedAgentRef.current && is3v1Scenario) {
                 action = trainedAgentRef.current.decide(context);
               } else {
-                if (!warnedNeuralFallbackRef.current) {
-                  console.warn(
-                    `[controller=neural] fallback: no valid trained policy for team=${player.team}, scenario=${engine.activeScenario?.id ?? 'custom'}; using rule_based`
-                  );
-                  warnedNeuralFallbackRef.current = true;
-                }
+                // Neural policy unavailable — explicit fallback
+                if (!neuralFallbackActive) setNeuralFallbackActive(true);
                 const ruleAgent = isLeft ? ruleAgentLeftRef.current : ruleAgentRightRef.current;
                 action = ruleAgent.decide(context);
               }
@@ -204,12 +200,8 @@ export default function App() {
         if (isLeft && trainedAgentRef.current && is3v1Scenario) {
           action = trainedAgentRef.current.decide(context);
         } else {
-          if (!warnedNeuralFallbackRef.current) {
-            console.warn(
-              `[controller=neural] fallback: no valid trained policy for team=${player.team}, scenario=${engine.activeScenario?.id ?? 'custom'}; using rule_based`
-            );
-            warnedNeuralFallbackRef.current = true;
-          }
+          // Neural policy unavailable — explicit fallback
+          if (!neuralFallbackActive) setNeuralFallbackActive(true);
           const ruleAgent = isLeft ? ruleAgentLeftRef.current : ruleAgentRightRef.current;
           action = ruleAgent.decide(context);
         }
@@ -426,6 +418,14 @@ export default function App() {
 
         {/* Pitch Canvas View (Rendered in Arena, Academy, and Replay tabs) */}
         <div className="space-y-3">
+          {/* Neural Policy Unavailable Banner */}
+          {neuralFallbackActive && engine.teamLeftConfig.controller === 'neural' && (
+            <div className="mb-2 p-2 rounded-lg bg-amber-900/80 border border-amber-600 text-amber-100 text-xs font-semibold text-center">
+              ⚠️ Neural Policy Unavailable — Using Rule-Based Fallback.
+              {modelError ? ` Error: ${modelError}` : ' No trained checkpoint loaded.'}
+            </div>
+          )}
+
           <PitchCanvas
             ball={displayBall as any}
             players={displayPlayers}
@@ -505,6 +505,7 @@ export default function App() {
             teamRight={engine.teamRightConfig}
             is3v1Scenario={engine.activeScenario?.id === 'academy_3_vs_1_with_keeper' || engine.players.filter((p) => p.team === 'left').length === 3}
             isModelLoading={isModelLoading}
+            modelError={modelError}
             onUpdateTeamLeft={(cfg) => {
               Object.assign(engine.teamLeftConfig, cfg);
               if (cfg.formation) {

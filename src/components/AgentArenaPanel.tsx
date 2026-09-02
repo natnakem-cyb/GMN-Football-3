@@ -10,6 +10,7 @@ interface AgentArenaPanelProps {
   onApplyPresetMatchup: (type: 'human_vs_ai' | 'ai_vs_ai' | 'neural_vs_rule') => void;
   is3v1Scenario?: boolean;
   isModelLoading?: boolean;
+  modelError?: string | null;
 }
 
 export const AgentArenaPanel: React.FC<AgentArenaPanelProps> = ({
@@ -20,6 +21,7 @@ export const AgentArenaPanel: React.FC<AgentArenaPanelProps> = ({
   onApplyPresetMatchup,
   is3v1Scenario = false,
   isModelLoading = false,
+  modelError = null,
 }) => {
   const formations: FormationType[] = ['4-3-3', '4-4-2', '3-5-2', '5-3-2', '1-2-1'];
 
@@ -81,13 +83,13 @@ export const AgentArenaPanel: React.FC<AgentArenaPanelProps> = ({
               >
                 <option value="human">👤 Human Player (Keyboard / Touch)</option>
                 <option value="rule_based">🤖 Tactical Rule AI</option>
-                {is3v1Scenario ? (
+                {is3v1Scenario && !modelError ? (
                   <option value="neural">
                     🧠 Neural Policy (Trained — Academy 3v1, Left side)
                   </option>
                 ) : (
                   <option value="neural" disabled>
-                    🧠 Neural Policy (not trained for this scenario)
+                    🧠 Neural Policy {modelError ? `(Unavailable: ${modelError})` : '(not trained for this scenario)'}
                   </option>
                 )}
                 <option value="heuristic">📊 Heuristic Bot (Untrained Baseline)</option>

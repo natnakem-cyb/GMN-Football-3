@@ -1,7 +1,7 @@
 import { ActionType, AgentAction, GameMode } from '../types/football';
 import { AgentDecisionContext, IAgent } from './BaseAgent';
 import { ObservationEncoder } from '../engine/ObservationEncoder';
-import { OBSERVATION_DIM, ACTION_SPACE_SIZE } from '../engine/Contract';
+import { OBSERVATION_DIM, ACTION_SPACE_SIZE, BASE_OBSERVATION_DIM } from '../engine/Contract';
 import { mapDiscreteAction } from '../engine/ActionMapping';
 import { MAPPO_WEIGHTS } from './mappo_weights';
 
@@ -39,6 +39,28 @@ export function assertMappoWeightsValid(): void {
 
   if (MAPPO_WEIGHTS.b2.length !== ACTION_SPACE_SIZE) {
     throw new Error(`[TrainedPolicyAgent] Bias dimension mismatch: b2.length=${MAPPO_WEIGHTS.b2.length}, expected ${ACTION_SPACE_SIZE}.`);
+  }
+
+  // CRITICAL: Detect smoke-test checkpoints with zero-padded role features.
+  // A real 127-dim trained policy must have non-zero weights for the role slice (indices 115-126).
+  // The previous smoke test had exactly 12 zeros per neuron in this slice.
+  const ROLE_START = BASE_OBSERVATION_DIM; // 115
+  const ROLE_END = OBSERVATION_DIM;        // 127
+  let nonZeroRoleWeights = 0;
+  for (let i = 0; i < 64; i++) {
+    const offset = i * OBSERVATION_DIM;
+    for (let j = ROLE_START; j < ROLE_END; j++) {
+      if (MAPPO_WEIGHTS.w0[offset + j] !== 0.0) {
+        nonZeroRoleWeights++;
+      }
+    }
+  }
+  if (nonZeroRoleWeights === 0) {
+    throw new Error(
+      `[TrainedPolicyAgent] CHECKPOINT REJECTED: The loaded weights have all-zero values for the role-feature slice (indices ${ROLE_START}-${ROLE_END - 1}). ` +
+      `This indicates a padded smoke-test checkpoint, not a policy trained under the 127-dim schema. ` +
+      `Run train_mappo.py with timesteps >= 200000, then export with export_onnx.py.`
+    );
   }
 }
 
