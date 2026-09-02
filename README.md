@@ -284,6 +284,12 @@ npm run test:validation   # rl_validation_suite.py
 
 ## Current Status
 
+**Neural Policy Checkpoint Status:**
+- The only MAPPO checkpoint currently in the repository (`mappo_academy_3_vs_1_with_keeper_trained.pt`) is a **49,920-step smoke test**, not a trained policy.
+- This checkpoint was originally trained under the 115-dim observation schema and was **zero-padded** to 127 dims when the schema changed. The 12 role-feature weights are all zeros — the network has never learned role-aware behavior.
+- The browser "Neural Policy" controller currently falls back to `RuleBasedAgent` because no valid trained policy exists for the 127-dim contract.
+- A real training run (≥200,000 steps) under the 127-dim schema has not yet been completed.
+
 **Implemented:**
 - Deterministic, seeded (Mulberry32) TypeScript simulation shared by browser and headless paths
 - 127-dim observation encoder with role information; 19-action discrete action space
@@ -306,6 +312,7 @@ GMN-Football-3 should currently be described as **an RL-ready football simulatio
 
 A few things worth knowing if you're extending this codebase:
 
+- **The "Neural" controller is currently a rule-based fallback.** `App.tsx` routes `controller === 'neural'` to `RuleBasedAgent` when `TrainedPolicyAgent` has no valid checkpoint. The UI still labels the team "Neural." This will remain the case until a real 127-dim checkpoint is trained and exported.
 - **ONNX export path is currently unused.** `training/export_onnx.py` and `public/models/mappo_policy.onnx` exist, and `onnxruntime-web` is a declared dependency, but `src/agents/TrainedPolicyAgent.ts` does not load the `.onnx` file — it runs a hand-written forward pass against weights baked into `src/agents/mappo_weights.ts`. Pick one path before extending the deployment pipeline further.
 - **Determinism is not guaranteed for every agent.** `RuleBasedAgent` and tackle resolution (`PhysicsEngine.executeTackle`) correctly use the seeded RNG; `NeuralHeuristicAgent` and `HumanAgent` currently use `Math.random()` directly for some decisions, so browser-only opponent behavior isn't reproducible (this doesn't affect training determinism, since neither is wired into the bridge).
 - **Two Python requirements files** (`requirements.txt` and `training/requirements.txt`) exist with different version bounds — `training/requirements.txt` is the one training scripts are actually validated against.
