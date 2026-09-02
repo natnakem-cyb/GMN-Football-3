@@ -3,6 +3,7 @@ import { ACADEMY_SCENARIOS } from '../src/scenarios/ScenarioRegistry';
 import { ActionType, AgentAction, GameMode } from '../src/types/football';
 import { mapDiscreteAction, ACTION_SPACE_SIZE } from './action_mapping';
 import { RuleBasedAgent } from '../src/agents/RuleBasedAgent';
+import { OBSERVATION_DIM, BASE_OBSERVATION_DIM, ROLE_DIM } from '../src/engine/Contract';
 
 interface FeatureStats {
   min: number;
@@ -13,14 +14,14 @@ interface FeatureStats {
 
 export function runObservationAndActionAudit(totalSteps = 100000) {
   console.log('==================================================');
-  console.log('1. OBSERVATION SPACE AUDIT (100,000 steps)');
+  console.log(`1. OBSERVATION SPACE AUDIT (${totalSteps.toLocaleString()} steps, ${OBSERVATION_DIM}-dim role-aware)`);
   console.log('==================================================');
 
   const engine = new GameEngine();
   let scenarioIdx = 0;
   engine.loadScenario(ACADEMY_SCENARIOS[scenarioIdx]);
 
-  const featureStats: FeatureStats[] = Array.from({ length: 115 }, () => ({
+  const featureStats: FeatureStats[] = Array.from({ length: OBSERVATION_DIM }, () => ({
     min: Infinity,
     max: -Infinity,
     sum: 0,
@@ -146,7 +147,7 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
     }
 
     // Observation stats
-    for (let d = 0; d < 115; d++) {
+    for (let d = 0; d < OBSERVATION_DIM; d++) {
       const val = obs[d] ?? 0;
       if (Number.isNaN(val)) {
         nanCount++;
@@ -178,7 +179,7 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
   console.log(`NaN Count: ${nanCount}`);
   console.log(`Infinity Count: ${infCount}`);
 
-  console.log('\n--- Selected Feature Range Summary (0..114) ---');
+  console.log(`\n--- Selected Feature Range Summary (0..${OBSERVATION_DIM - 1}) ---`);
   console.log('Dims  0-43 (Left Players: x, y, vx, vy):');
   console.log(`  x: [${featureStats[0].min.toFixed(3)}, ${featureStats[0].max.toFixed(3)}], y: [${featureStats[1].min.toFixed(3)}, ${featureStats[1].max.toFixed(3)}], vx: [${featureStats[22].min.toFixed(3)}, ${featureStats[22].max.toFixed(3)}], vy: [${featureStats[23].min.toFixed(3)}, ${featureStats[23].max.toFixed(3)}]`);
   console.log('Dims 44-87 (Right Players: x, y, vx, vy):');
@@ -195,6 +196,12 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
   modeNames.forEach((name, idx) => {
     const dim = 108 + idx;
     console.log(`  - ${name} (dim ${dim}): [${featureStats[dim].min}, ${featureStats[dim].max}] (active: ${featureStats[dim].max > 0 ? 'YES' : 'NO'})`);
+  });
+  console.log('Dims 115-126 (Role One-Hot [GK, CB, LB, RB, CDM, CM, LM, RM, LW, RW, CAM, ST]):');
+  const roleNames = ['GK', 'CB', 'LB', 'RB', 'CDM', 'CM', 'LM', 'RM', 'LW', 'RW', 'CAM', 'ST'];
+  roleNames.forEach((role, idx) => {
+    const dim = BASE_OBSERVATION_DIM + idx;
+    console.log(`  - ${role} (dim ${dim}): [${featureStats[dim].min}, ${featureStats[dim].max}] (active: ${featureStats[dim].max > 0 ? 'YES' : 'NO'})`);
   });
 
   const rewardMean = rewardSum / totalRewards;

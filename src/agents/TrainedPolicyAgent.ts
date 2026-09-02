@@ -70,10 +70,33 @@ export class TrainedPolicyAgent implements IAgent {
   type: 'neural' = 'neural';
 
   private lastAction: AgentAction = { type: ActionType.IDLE };
+  private weights = MAPPO_WEIGHTS;
 
-  private constructor(id: string) {
+  public constructor(idOrWeights?: string | typeof MAPPO_WEIGHTS, customWeights?: typeof MAPPO_WEIGHTS) {
+    if (typeof idOrWeights === 'object' && idOrWeights !== null) {
+      this.weights = idOrWeights;
+      this.id = 'trained_ppo';
+    } else {
+      this.id = typeof idOrWeights === 'string' ? idOrWeights : 'trained_ppo';
+      if (customWeights) {
+        this.weights = customWeights;
+      }
+    }
     assertMappoWeightsValid();
-    this.id = id;
+  }
+
+  /**
+   * Evaluates if this agent instance holds a valid role-aware checkpoint.
+   */
+  public isValidCheckpoint(): boolean {
+    return TrainedPolicyAgent.isCheckpointValid();
+  }
+
+  /**
+   * Action selection given a raw 127-float observation array.
+   */
+  public act(obs: number[], _deterministic = true): number {
+    return this.predictDiscreteAction(obs);
   }
 
   /**
@@ -124,12 +147,47 @@ export class TrainedPolicyAgent implements IAgent {
   }
 
   /**
+   * Evaluates observation vector and returns the discrete action index (0..18).
+   */
+  public predictDiscreteAction(obs: number[]): number {
+    const logits = this.computeForwardMath(obs);
+    let bestIdx = 0;
+    let bestVal = -Infinity;
+    for (let i = 0; i < logits.length; i++) {
+      if (logits[i] > bestVal) {
+        bestVal = logits[i];
+        bestIdx = i;
+      }
+    }
+    return bestIdx;
+  }
+
+  /**
+   * Public accessor for computing network output logits given a raw observation vector.
+   */
+  public computeLogits(obs: number[]): number[] {
+    return this.computeForwardMath(obs);
+  }
+
+  /**
+   * Verifies if embedded weights pass all schema and non-zero role slice checks.
+   */
+  public static isCheckpointValid(): boolean {
+    try {
+      assertMappoWeightsValid();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Direct forward-pass MLP evaluation of the trained actor network:
    * Layer 0: Linear(OBSERVATION_DIM, 64) -> Tanh (where OBSERVATION_DIM = 127)
    * Layer 1: Linear(64, 64) -> Tanh
    * Layer 2: Linear(64, 19) -> Logits
    */
-  private computeForwardMath(obs: number[]): number[] {
+  public computeForwardMath(obs: number[]): number[] {
     assertMappoWeightsValid();
     const { w0, b0, w1, b1, w2, b2 } = MAPPO_WEIGHTS;
 

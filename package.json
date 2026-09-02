@@ -28,7 +28,13 @@
     "test:pettingzoo": "python3 training/test_pettingzoo_wrapper.py",
     "test:ippo": "python3 training/train_ippo.py 3072",
     "test:ippo:train": "python3 training/train_ippo.py 200000",
-    "test:ippo:eval": "python3 training/eval_ippo_baseline.py --compare-both"
+    "test:ippo:eval": "python3 training/eval_ippo_baseline.py --compare-both",
+    "eval:baselines": "tsx training/eval_baseline_ladder.ts",
+    "eval:generalization": "tsx training/eval_generalization.ts",
+    "eval:opponents": "tsx training/eval_opponent_robustness.ts",
+    "eval:ablations": "tsx training/eval_ablations.ts",
+    "test:browser-parity": "tsx training/test_browser_inference_parity.ts",
+    "validate:policy": "tsx training/validate_learned_policy.ts"
   },
   "dependencies": {
     "@google/genai": "latest",

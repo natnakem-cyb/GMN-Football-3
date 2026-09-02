@@ -1,0 +1,154 @@
+"""
+GMN-Football-3 — Checkpoint Contract & Metadata Validation System (Python)
+Authoritative verification of checkpoint compatibility, observation/action schemas,
+role-slice non-zero validation, and experiment manifest serialization.
+"""
+
+import os
+import json
+import hashlib
+import datetime
+from typing import Dict, Any, Optional, Tuple
+
+GMN_ENV_VERSION = "3.1.0"
+OBSERVATION_SCHEMA_VERSION = "simple115_v3_role"
+BASE_OBSERVATION_DIM = 115
+ROLE_DIM = 12
+OBSERVATION_DIM = 127
+ACTION_SCHEMA_VERSION = "discrete19_v1"
+ACTION_SPACE_SIZE = 19
+
+
+def compute_file_sha256(file_path: str) -> str:
+    """Computes SHA256 hex digest of a checkpoint file."""
+    if not os.path.exists(file_path):
+        return "FILE_NOT_FOUND"
+    sha = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while chunk := f.read(8192):
+            sha.update(chunk)
+    return sha.hexdigest()
+
+
+def validate_checkpoint_weights(actor_state_dict: Dict[str, Any]) -> Tuple[bool, bool, Optional[str]]:
+    """
+    Validates PyTorch actor state dict against the authoritative 127-dim contract.
+    Returns: (is_valid, is_role_aware, rejection_reason)
+    """
+    # Find layer 0 weight
+    w0_key = None
+    for k in ["0.weight", "fc1.weight", "actor.0.weight", "policy.0.weight"]:
+        if k in actor_state_dict:
+            w0_key = k
+            break
+
+    if w0_key is None:
+        # Check first key ending in weight
+        for k in actor_state_dict.keys():
+            if "weight" in k:
+                w0_key = k
+                break
+
+    if w0_key is None:
+        return False, False, "Could not locate first linear layer weight in actor state dict."
+
+    w0 = actor_state_dict[w0_key]
+    # Expect w0 shape: (hidden_dim, in_dim) e.g. (64, 127)
+    if hasattr(w0, "shape"):
+        hidden_dim, in_dim = w0.shape[0], w0.shape[1]
+    elif hasattr(w0, "__len__") and hasattr(w0[0], "__len__"):
+        hidden_dim, in_dim = len(w0), len(w0[0])
+    else:
+        return False, False, "Invalid w0 tensor shape or type."
+
+    if in_dim != OBSERVATION_DIM:
+        return (
+            False,
+            False,
+            f"Input dimension mismatch: expected {OBSERVATION_DIM} ({OBSERVATION_SCHEMA_VERSION}), got {in_dim}.",
+        )
+
+    # Check role slice (BASE_OBSERVATION_DIM .. OBSERVATION_DIM - 1)
+    non_zero_role_weights = 0
+    total_role_weights = 0
+
+    if hasattr(w0, "cpu"):
+        w0_np = w0.detach().cpu().numpy()
+    else:
+        import numpy as np
+        w0_np = np.array(w0)
+
+    role_slice = w0_np[:, BASE_OBSERVATION_DIM:OBSERVATION_DIM]
+    total_role_weights = role_slice.size
+    non_zero_role_weights = int((abs(role_slice) > 1e-7).sum())
+
+    if non_zero_role_weights == 0:
+        return (
+            False,
+            False,
+            f"CHECKPOINT REJECTED: All {total_role_weights} role-feature weights (indices {BASE_OBSERVATION_DIM}..{OBSERVATION_DIM-1}) are exact zeros. This indicates a zero-padded placeholder/smoke-test checkpoint rather than a policy genuinely trained with role features.",
+        )
+
+    return True, True, None
+
+
+def validate_checkpoint_metadata(meta: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Validates metadata dictionary."""
+    if meta.get("env_version") != GMN_ENV_VERSION:
+        return False, f"Environment version mismatch: expected {GMN_ENV_VERSION}, got {meta.get('env_version')}."
+    if meta.get("observation_schema") != OBSERVATION_SCHEMA_VERSION or meta.get("observation_dim") != OBSERVATION_DIM:
+        return (
+            False,
+            f"Observation schema mismatch: expected {OBSERVATION_SCHEMA_VERSION} ({OBSERVATION_DIM}-dim), got {meta.get('observation_schema')} ({meta.get('observation_dim')}-dim).",
+        )
+    if meta.get("action_schema") != ACTION_SCHEMA_VERSION or meta.get("action_space_size") != ACTION_SPACE_SIZE:
+        return (
+            False,
+            f"Action schema mismatch: expected {ACTION_SCHEMA_VERSION} ({ACTION_SPACE_SIZE} actions), got {meta.get('action_schema')} ({meta.get('action_space_size')} actions).",
+        )
+    return True, None
+
+
+def create_experiment_manifest(
+    algorithm: str,
+    scenario: str,
+    training_steps: int,
+    seed: int,
+    checkpoint_path: str,
+    actor_state_dict: Optional[Dict[str, Any]] = None,
+    hyperparameters: Optional[Dict[str, Any]] = None,
+    git_commit: Optional[str] = None
+) -> Dict[str, Any]:
+    """Generates a standardized experiment manifest dictionary."""
+    chk_hash = compute_file_sha256(checkpoint_path)
+    is_valid = True
+    is_role_aware = False
+    rejection_reason = None
+
+    if actor_state_dict is not None:
+        is_valid, is_role_aware, rejection_reason = validate_checkpoint_weights(actor_state_dict)
+    elif algorithm in ["rule_based", "scripted", "random", "noop"]:
+        is_valid = True
+        is_role_aware = True
+
+    manifest = {
+        "algorithm": algorithm.lower(),
+        "scenario": scenario,
+        "training_steps": training_steps,
+        "seed": seed,
+        "env_version": GMN_ENV_VERSION,
+        "observation_schema": OBSERVATION_SCHEMA_VERSION,
+        "observation_dim": OBSERVATION_DIM,
+        "action_schema": ACTION_SCHEMA_VERSION,
+        "action_space_size": ACTION_SPACE_SIZE,
+        "git_commit": git_commit or "unavailable",
+        "checkpoint_path": checkpoint_path,
+        "checkpoint_hash": chk_hash,
+        "is_role_aware": is_role_aware,
+        "role_weights_non_zero": is_role_aware,
+        "is_valid": is_valid,
+        "rejection_reason": rejection_reason,
+        "hyperparameters": hyperparameters or {},
+        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+    return manifest
