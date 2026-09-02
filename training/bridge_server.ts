@@ -46,7 +46,7 @@ export class GMNBridgeService {
     if (sc) {
       this.engine.loadScenario(sc, seed);
     } else {
-      this.engine.resetToKickoff(seed);
+      this.engine.resetToKickoff(false, seed);
     }
 
     // Reset bot states
@@ -335,7 +335,7 @@ export function encodeStepBinary(stepResult: ReturnType<typeof bridge.step>): Bu
   buf.writeFloatLE(stepResult.info.checkpointReward ?? 0.0, 8);
   buf.writeFloatLE(stepResult.info.ballDistanceToGoal ?? 0.0, 12);
 
-  const eventType = stepResult.info.event?.type;
+  const eventType = typeof stepResult.info.event === 'string' ? stepResult.info.event : (stepResult.info.event as any)?.type;
   const eventCode = getEventCode(eventType);
   buf.writeUInt8(eventCode, 16);
 
@@ -369,7 +369,7 @@ export function encodeMultiStepBinary(multiResult: ReturnType<typeof bridge.step
   buf.writeFloatLE(multiResult.info.checkpointReward ?? 0.0, 8);
   buf.writeFloatLE(multiResult.info.ballDistanceToGoal ?? 0.0, 12);
 
-  const eventType = multiResult.info.event?.type;
+  const eventType = typeof multiResult.info.event === 'string' ? multiResult.info.event : (multiResult.info.event as any)?.type;
   const eventCode = getEventCode(eventType);
   buf.writeUInt8(eventCode, 16);
 

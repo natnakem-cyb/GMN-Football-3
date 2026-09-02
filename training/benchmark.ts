@@ -19,7 +19,7 @@ function benchmarkRawEngine(totalSteps = 10000) {
     const actionMap = new Map<string, AgentAction>();
     const controlledPlayer = engine.players[0];
     if (controlledPlayer) {
-      actionMap.set(controlledPlayer.id, mapDiscreteAction(i % ACTION_SPACE_SIZE, controlledPlayer.heading));
+      actionMap.set(controlledPlayer.id, mapDiscreteAction(i % ACTION_SPACE_SIZE));
     }
 
     const res = engine.step(actionMap, 1 / 60);

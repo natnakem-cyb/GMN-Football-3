@@ -2,7 +2,7 @@ import { GameEngine } from '../src/engine/GameEngine';
 import { ACADEMY_SCENARIOS } from '../src/scenarios/ScenarioRegistry';
 import { ActionType, AgentAction } from '../src/types/football';
 import { RuleBasedAgent } from '../src/agents/RuleBasedAgent';
-import { Vec2 } from '../engine/Vector';
+import { Vec2 } from '../src/engine/Vector';
 
 export function evaluateScriptedAgent(numEpisodes = 100) {
   console.log('==================================================');
@@ -46,7 +46,7 @@ export function evaluateScriptedAgent(numEpisodes = 100) {
 
       if (res.terminated || res.truncated) {
         done = true;
-        if (engine.score.left > 0 || (typeof res.info.event === 'object' && res.info.event?.type === 'goal')) {
+        if (engine.score.left > 0 || (typeof res.info.event === 'string' && res.info.event.toLowerCase().includes('goal'))) {
           goals++;
         }
       }

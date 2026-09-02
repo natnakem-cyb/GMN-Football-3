@@ -1,21 +1,44 @@
 import { ActionType, AgentAction, GameMode } from '../types/football';
 import { AgentDecisionContext, IAgent } from './BaseAgent';
 import { ObservationEncoder } from '../engine/ObservationEncoder';
-import { OBSERVATION_DIM } from '../engine/Contract';
+import { OBSERVATION_DIM, ACTION_SPACE_SIZE } from '../engine/Contract';
+import { mapDiscreteAction } from '../engine/ActionMapping';
 import { MAPPO_WEIGHTS } from './mappo_weights';
 
-const SQRT_HALF = 0.7071067811865476;
-
 /**
- * Assert that MAPPO_WEIGHTS matches the current OBSERVATION_DIM (127 floats).
- * Throws a clear runtime error if the embedded weights were exported from a legacy checkpoint.
+ * Assert that MAPPO_WEIGHTS matches the current OBSERVATION_DIM (127 floats) and network architecture.
+ * Throws a clear runtime error if the embedded weights were exported from a legacy checkpoint or corrupted.
  */
 export function assertMappoWeightsValid(): void {
+  if (!MAPPO_WEIGHTS) {
+    throw new Error('[TrainedPolicyAgent] MAPPO_WEIGHTS is missing or undefined.');
+  }
+
   const expectedW0Len = 64 * OBSERVATION_DIM;
-  if (MAPPO_WEIGHTS.w0.length !== expectedW0Len || MAPPO_WEIGHTS.w0.length % OBSERVATION_DIM !== 0) {
+  if (MAPPO_WEIGHTS.w0.length !== expectedW0Len) {
     throw new Error(
       `[TrainedPolicyAgent] Weight/OBSERVATION_DIM mismatch: w0.length=${MAPPO_WEIGHTS.w0.length}, expected ${expectedW0Len}. Re-export weights from a 127-dim checkpoint (see training/export_onnx.py).`
     );
+  }
+
+  if (MAPPO_WEIGHTS.b0.length !== 64) {
+    throw new Error(`[TrainedPolicyAgent] Bias dimension mismatch: b0.length=${MAPPO_WEIGHTS.b0.length}, expected 64.`);
+  }
+
+  if (MAPPO_WEIGHTS.w1.length !== 64 * 64) {
+    throw new Error(`[TrainedPolicyAgent] Hidden weight mismatch: w1.length=${MAPPO_WEIGHTS.w1.length}, expected 4096.`);
+  }
+
+  if (MAPPO_WEIGHTS.b1.length !== 64) {
+    throw new Error(`[TrainedPolicyAgent] Bias dimension mismatch: b1.length=${MAPPO_WEIGHTS.b1.length}, expected 64.`);
+  }
+
+  if (MAPPO_WEIGHTS.w2.length !== ACTION_SPACE_SIZE * 64) {
+    throw new Error(`[TrainedPolicyAgent] Output weight mismatch: w2.length=${MAPPO_WEIGHTS.w2.length}, expected ${ACTION_SPACE_SIZE * 64}.`);
+  }
+
+  if (MAPPO_WEIGHTS.b2.length !== ACTION_SPACE_SIZE) {
+    throw new Error(`[TrainedPolicyAgent] Bias dimension mismatch: b2.length=${MAPPO_WEIGHTS.b2.length}, expected ${ACTION_SPACE_SIZE}.`);
   }
 }
 
@@ -70,7 +93,7 @@ export class TrainedPolicyAgent implements IAgent {
       }
     }
 
-    this.lastAction = this.mapActionIndex(bestIdx, context.player.heading);
+    this.lastAction = mapDiscreteAction(bestIdx);
     return this.lastAction;
   }
 
@@ -88,23 +111,11 @@ export class TrainedPolicyAgent implements IAgent {
     assertMappoWeightsValid();
     const { w0, b0, w1, b1, w2, b2 } = MAPPO_WEIGHTS;
 
-    // Defensive check: ensure full row capacity for Layer 0
-    if (w0.length < 64 * OBSERVATION_DIM) {
-      throw new Error(
-        `[TrainedPolicyAgent] Weight buffer underflow: w0.length=${w0.length} < 64 * OBSERVATION_DIM (${64 * OBSERVATION_DIM})`
-      );
-    }
-
     // Layer 0: Linear(OBSERVATION_DIM, 64) -> Tanh
     const h0 = new Float32Array(64);
     for (let i = 0; i < 64; i++) {
       let sum = b0[i];
       const offset = i * OBSERVATION_DIM;
-      if (w0.length < offset + OBSERVATION_DIM) {
-        throw new Error(
-          `[TrainedPolicyAgent] Row offset out of bounds: w0.length=${w0.length} < ${offset + OBSERVATION_DIM}`
-        );
-      }
       for (let j = 0; j < OBSERVATION_DIM; j++) {
         sum += w0[offset + j] * obs[j];
       }
@@ -123,8 +134,8 @@ export class TrainedPolicyAgent implements IAgent {
     }
 
     // Layer 2: Linear(64, 19) -> Logits
-    const logits = new Float32Array(19);
-    for (let i = 0; i < 19; i++) {
+    const logits = new Float32Array(ACTION_SPACE_SIZE);
+    for (let i = 0; i < ACTION_SPACE_SIZE; i++) {
       let sum = b2[i];
       const offset = i * 64;
       for (let j = 0; j < 64; j++) {
@@ -134,53 +145,5 @@ export class TrainedPolicyAgent implements IAgent {
     }
 
     return Array.from(logits);
-  }
-
-  /**
-   * Authoritative 19-action discrete mapping matching GMN-Football-3 specifications.
-   */
-  private mapActionIndex(idx: number, _currentHeading = 0): AgentAction {
-    switch (idx) {
-      case 0:
-        return { type: ActionType.IDLE };
-      case 1: // LEFT
-        return { type: ActionType.MOVE, direction: { x: -1.0, y: 0.0 } };
-      case 2: // TOP_LEFT
-        return { type: ActionType.MOVE, direction: { x: -SQRT_HALF, y: -SQRT_HALF } };
-      case 3: // TOP
-        return { type: ActionType.MOVE, direction: { x: 0.0, y: -1.0 } };
-      case 4: // TOP_RIGHT
-        return { type: ActionType.MOVE, direction: { x: SQRT_HALF, y: -SQRT_HALF } };
-      case 5: // RIGHT
-        return { type: ActionType.MOVE, direction: { x: 1.0, y: 0.0 } };
-      case 6: // BOTTOM_RIGHT
-        return { type: ActionType.MOVE, direction: { x: SQRT_HALF, y: SQRT_HALF } };
-      case 7: // BOTTOM
-        return { type: ActionType.MOVE, direction: { x: 0.0, y: 1.0 } };
-      case 8: // BOTTOM_LEFT
-        return { type: ActionType.MOVE, direction: { x: -SQRT_HALF, y: SQRT_HALF } };
-      case 9: // LONG_PASS
-        return { type: ActionType.LONG_PASS, power: 1.0 };
-      case 10: // HIGH_PASS
-        return { type: ActionType.HIGH_PASS, power: 0.85 };
-      case 11: // SHORT_PASS
-        return { type: ActionType.SHORT_PASS, power: 0.75 };
-      case 12: // SHOT
-        return { type: ActionType.SHOT, power: 0.95 };
-      case 13: // SPRINT
-        return { type: ActionType.SPRINT };
-      case 14: // RELEASE_DIRECTION
-        return { type: ActionType.RELEASE_DIRECTION };
-      case 15: // RELEASE_SPRINT
-        return { type: ActionType.RELEASE_SPRINT };
-      case 16: // SLIDING / TACKLE
-        return { type: ActionType.TACKLE };
-      case 17: // DRIBBLE
-        return { type: ActionType.DRIBBLE };
-      case 18: // RELEASE_DRIBBLE
-        return { type: ActionType.RELEASE_DRIBBLE };
-      default:
-        return { type: ActionType.IDLE };
-    }
   }
 }

@@ -65,7 +65,7 @@ export function runStage2Audit() {
         }
 
         const actionIdx = Math.floor(Math.random() * ACTION_SPACE_SIZE);
-        const action = mapDiscreteAction(actionIdx, player.heading);
+        const action = mapDiscreteAction(actionIdx);
 
         const actionMap = new Map<string, AgentAction>([[player.id, action]]);
 
@@ -94,7 +94,7 @@ export function runStage2Audit() {
 
         if (res.terminated || res.truncated) {
           done = true;
-          if (eng.score.left > 0 || (typeof res.info.event === 'object' && res.info.event?.type === 'goal')) {
+          if (eng.score.left > 0 || (typeof res.info.event === 'string' && res.info.event.toLowerCase().includes('goal'))) {
             goals++;
           } else if (eng.ball.ownerId && eng.players.find((p) => p.id === eng.ball.ownerId)?.team === 'right') {
             dispossessed++;
@@ -189,7 +189,7 @@ export function runStage2Audit() {
 
         if (res.terminated || res.truncated) {
           done = true;
-          if (eng.score.left > 0 || (typeof res.info.event === 'object' && res.info.event?.type === 'goal')) {
+          if (eng.score.left > 0 || (typeof res.info.event === 'string' && res.info.event.toLowerCase().includes('goal'))) {
             goals++;
           } else {
             dispossessed++;

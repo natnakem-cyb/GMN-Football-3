@@ -88,6 +88,7 @@ export class GameEngine {
   public maxReplayFrames = 3000;
   public events: MatchEvent[] = [];
   private eventIdCounter: number = 0;
+  public maxBallProgressX: number = 0;
 
   private possessionTicks = { left: 0, right: 0 };
   private goalResetTimer = 0;
@@ -135,6 +136,7 @@ export class GameEngine {
     this.stats = this.createDefaultStats();
     this.currentPassTracking = null;
     this.activeScenario = null;
+    this.maxBallProgressX = this.ball.position.x;
 
     this.teamLeftConfig.formation = leftFormation;
     this.teamRightConfig.formation = rightFormation;
@@ -269,6 +271,7 @@ export class GameEngine {
     } else {
       this.ball.position = { ...scenario.setup.ball };
     }
+    this.maxBallProgressX = this.ball.position.x;
 
     // Setup left players (if empty, fallback to formation layout)
     if (scenario.setup.leftPlayers.length === 0 && scenario.teamLeftPlayers > 0) {
@@ -509,17 +512,23 @@ export class GameEngine {
       this.gameMode
     );
 
-    const shotTakenByLeft = this.events
-      .slice(eventsBefore)
-      .some((e) => e.type === 'shot' && e.team === 'left');
+    const newEventsThisTick = this.events.slice(eventsBefore);
+    if (newEventsThisTick.length > 0) {
+      const lastEvent = newEventsThisTick[newEventsThisTick.length - 1];
+      eventDescription = lastEvent.description || lastEvent.type;
+    }
 
-    const { reward, checkpoint } = ObservationEncoder.computeReward(
+    const shotTakenByLeft = newEventsThisTick.some((e) => e.type === 'shot' && e.team === 'left');
+
+    const { reward, checkpoint, newMaxBallProgressX } = ObservationEncoder.computeReward(
       prevBallX,
       this.ball.position.x,
       goalScoredThisTick,
       'left',
-      shotTakenByLeft
+      shotTakenByLeft,
+      this.maxBallProgressX
     );
+    this.maxBallProgressX = newMaxBallProgressX;
 
     const isAcademyGoal = Boolean(
       this.activeScenario?.id.startsWith('academy') && goalScoredThisTick !== null
@@ -665,7 +674,22 @@ export class GameEngine {
           this.ball.isShotInFlight = true;
 
           this.stats.shots[player.team]++;
-          this.stats.shotsOnTarget[player.team]++;
+
+          // Check if shot trajectory intersects the opponent goal line within goal mouth [goalMinY, goalMaxY]
+          let isOnTarget = false;
+          if (dir.x !== 0 && ((player.team === 'left' && dir.x > 0) || (player.team === 'right' && dir.x < 0))) {
+            const t = (opponentGoalX - player.position.x) / dir.x;
+            if (t > 0) {
+              const intersectY = player.position.y + dir.y * t;
+              if (intersectY >= PITCH.goalMinY && intersectY <= PITCH.goalMaxY) {
+                isOnTarget = true;
+              }
+            }
+          }
+          if (isOnTarget) {
+            this.stats.shotsOnTarget[player.team]++;
+          }
+
           this.stats.shotLocations.push({
             x: player.position.x,
             y: player.position.y,
@@ -1039,13 +1063,17 @@ export class GameEngine {
     this.ball.isShotInFlight = false;
   }
 
-  public resetToKickoff(resetScore = false): void {
+  public resetToKickoff(resetScore = false, seed?: number): void {
+    if (seed !== undefined) {
+      this.setSeed(seed);
+    }
     this.status = 'playing';
     this.gameMode = GameMode.KickOff;
     if (resetScore) {
       this.score = { left: 0, right: 0 };
     }
     this.ball = this.createDefaultBall();
+    this.maxBallProgressX = this.ball.position.x;
     this.players.forEach((p) => {
       p.hasBall = false;
       p.velocity = { x: 0, y: 0 };

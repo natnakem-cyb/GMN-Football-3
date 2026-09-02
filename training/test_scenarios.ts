@@ -100,6 +100,38 @@ for (const scenario of ACADEMY_SCENARIOS) {
   }
 }
 
+// Regression test for Issue #2: resetToKickoff(resetScore = false, seed?: number)
+// Verifies: unrecognized scenario / kickoff reset + seed -> score unchanged, seed correctly applied
+totalTests++;
+console.log('\nValidating Regression: resetToKickoff with seed and score preservation...');
+try {
+  const engine = new GameEngine();
+  engine.score = { left: 3, right: 2 };
+  const targetSeed = 987654;
+  engine.resetToKickoff(false, targetSeed);
+
+  if (engine.score.left !== 3 || engine.score.right !== 2) {
+    throw new Error(`Score was corrupted by resetToKickoff with seed! Expected 3-2, got ${engine.score.left}-${engine.score.right}`);
+  }
+
+  // Verify RNG state matches fresh SeededRNG with targetSeed
+  const testVal1 = engine.rng.next();
+  const testVal2 = engine.rng.next();
+
+  const referenceRng = new (engine.rng.constructor as any)(targetSeed);
+  const refVal1 = referenceRng.next();
+  const refVal2 = referenceRng.next();
+
+  if (testVal1 !== refVal1 || testVal2 !== refVal2) {
+    throw new Error(`Seed was not correctly applied to RNG in resetToKickoff!`);
+  }
+
+  console.log('  ✓ Successfully verified resetToKickoff score preservation and seed application.');
+  passedTests++;
+} catch (err: any) {
+  console.error('  ✗ FAILED regression test for resetToKickoff:', err.message);
+}
+
 console.log('\n====================================================');
 console.log(`Scenario Validation Summary: ${passedTests}/${totalTests} Scenarios Passed`);
 console.log('====================================================');

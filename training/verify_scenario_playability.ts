@@ -1,7 +1,8 @@
 import { GameEngine } from '../src/engine/GameEngine';
 import { ACADEMY_SCENARIOS } from '../src/scenarios/ScenarioRegistry';
 import { RuleBasedAgent } from '../src/agents/RuleBasedAgent';
-import { ActionType, AgentAction, AgentDecisionContext } from '../src/types/football';
+import { AgentDecisionContext } from '../src/agents/BaseAgent';
+import { ActionType, AgentAction } from '../src/types/football';
 
 export interface ScenarioPlayabilityResult {
   scenarioId: string;

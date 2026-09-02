@@ -170,7 +170,7 @@ export class ObservationEncoder {
    * Reward shaping computation:
    * +1.0 for scoring a goal
    * -1.0 for conceding a goal
-   * Checkpoint reward for moving ball closer to opponent goal (up to +0.05)
+   * Checkpoint reward for monotonically advancing ball closer to opponent goal (up to +0.05)
    * +0.03 shot-attempt shaping bonus
    */
   static computeReward(
@@ -178,10 +178,12 @@ export class ObservationEncoder {
     currBallX: number,
     goalScoredTeam: TeamSide | null,
     targetTeam: TeamSide = 'left',
-    shotTakenByTargetTeam = false
-  ): { reward: number; checkpoint: number } {
+    shotTakenByTargetTeam = false,
+    maxBallProgressX?: number
+  ): { reward: number; checkpoint: number; newMaxBallProgressX: number } {
     let reward = 0;
     let checkpoint = 0;
+    let newMaxBallProgressX = maxBallProgressX !== undefined ? maxBallProgressX : prevBallX;
 
     if (goalScoredTeam === targetTeam) {
       reward += 1.0;
@@ -189,18 +191,25 @@ export class ObservationEncoder {
       reward -= 1.0;
     }
 
-    // Checkpoint reward: moving ball towards opponent's goal (for left team, positive X; for right team, negative X)
+    // Monotonic checkpoint reward: only pays when exceeding the episode high-water mark
+    // (for left team, progress is positive X; for right team, progress is negative X)
     if (targetTeam === 'left') {
-      const deltaX = currBallX - prevBallX;
-      if (deltaX > 0.005) {
-        checkpoint = Math.min(0.05, deltaX * 0.5);
-        reward += checkpoint;
+      if (currBallX > newMaxBallProgressX) {
+        const deltaX = currBallX - newMaxBallProgressX;
+        if (deltaX > 0.005) {
+          checkpoint = Math.min(0.05, deltaX * 0.5);
+          reward += checkpoint;
+        }
+        newMaxBallProgressX = currBallX;
       }
     } else if (targetTeam === 'right') {
-      const deltaX = prevBallX - currBallX; // moving left (toward right team's target goal at x=-1)
-      if (deltaX > 0.005) {
-        checkpoint = Math.min(0.05, deltaX * 0.5);
-        reward += checkpoint;
+      if (currBallX < newMaxBallProgressX) {
+        const deltaX = newMaxBallProgressX - currBallX;
+        if (deltaX > 0.005) {
+          checkpoint = Math.min(0.05, deltaX * 0.5);
+          reward += checkpoint;
+        }
+        newMaxBallProgressX = currBallX;
       }
     }
 
@@ -211,6 +220,6 @@ export class ObservationEncoder {
       reward += SHOT_ATTEMPT_BONUS;
     }
 
-    return { reward, checkpoint };
+    return { reward, checkpoint, newMaxBallProgressX };
   }
 }

@@ -70,10 +70,10 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
       } else if (Math.random() < 0.5 && dist > 0.02) {
         action = { type: ActionType.MOVE, direction: { x: dx / dist, y: dy / dist } };
       } else {
-        action = mapDiscreteAction(actionIdx, controlledPlayer.heading);
+        action = mapDiscreteAction(actionIdx);
       }
     } else {
-      action = mapDiscreteAction(actionIdx, controlledPlayer?.heading || 0);
+      action = mapDiscreteAction(actionIdx);
     }
 
     const actionMap = new Map<string, AgentAction>();
@@ -141,7 +141,7 @@ export function runObservationAndActionAudit(totalSteps = 100000) {
     rewardSqSum += rew * rew;
     totalRewards++;
 
-    if (typeof stepResult.info.event === 'object' && stepResult.info.event?.type === 'goal') {
+    if (typeof stepResult.info.event === 'string' && stepResult.info.event.toLowerCase().includes('goal')) {
       goalsScored++;
     }
 
@@ -281,7 +281,7 @@ function auditAllActions() {
     // Run action for 30 steps
     for (let t = 0; t < 30; t++) {
       const p = engine.players[0];
-      const action = mapDiscreteAction(a, p.heading);
+      const action = mapDiscreteAction(a);
       const actionMap = new Map<string, AgentAction>([[p.id, action]]);
       const res = engine.step(actionMap, 1 / 60);
       totalReward += res.reward;
@@ -294,7 +294,7 @@ function auditAllActions() {
     const bdx = bFinal.x - bInit.x;
     const bdy = bFinal.y - bInit.y;
 
-    const mapped = mapDiscreteAction(a, 0);
+    const mapped = mapDiscreteAction(a);
     const valid =
       (a === 0 && (Math.abs(dx) < 0.1 || mapped.type === ActionType.IDLE)) ||
       (a > 0 &&
@@ -636,7 +636,7 @@ function auditOffsideMechanics() {
     let offsideTriggered = false;
     for (let step = 0; step < 120; step++) {
       engine.step(new Map(), 1 / 60);
-      if (engine.gameMode === GameMode.FreeKick) {
+      if ((engine.gameMode as GameMode) === GameMode.FreeKick) {
         const offsideEvent = engine.events.find((e) => e.description.includes('was offside!'));
         if (offsideEvent && engine.stats.completedPasses.left === 0) {
           offsideTriggered = true;
