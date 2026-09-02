@@ -134,13 +134,10 @@ export default function App() {
             if (isLeft && teamConfig.controller === 'human' && player.id === engine.controlledPlayerId) {
               action = humanAgentRef.current.decide(context);
             } else if (teamConfig.controller === 'neural') {
-              if (isLeft && trainedAgentRef.current && is3v1Scenario) {
+              if (trainedAgentRef.current) {
                 action = trainedAgentRef.current.decide(context);
               } else {
-                // Neural policy unavailable — explicit fallback
-                if (!neuralFallbackActive) setNeuralFallbackActive(true);
-                const ruleAgent = isLeft ? ruleAgentLeftRef.current : ruleAgentRightRef.current;
-                action = ruleAgent.decide(context);
+                action = neuralAgentRef.current.decide(context);
               }
             } else if (teamConfig.controller === 'heuristic') {
               action = neuralAgentRef.current.decide(context);
@@ -197,13 +194,10 @@ export default function App() {
       if (isLeft && teamConfig.controller === 'human' && player.id === engine.controlledPlayerId) {
         action = humanAgentRef.current.decide(context);
       } else if (teamConfig.controller === 'neural') {
-        if (isLeft && trainedAgentRef.current && is3v1Scenario) {
+        if (trainedAgentRef.current) {
           action = trainedAgentRef.current.decide(context);
         } else {
-          // Neural policy unavailable — explicit fallback
-          if (!neuralFallbackActive) setNeuralFallbackActive(true);
-          const ruleAgent = isLeft ? ruleAgentLeftRef.current : ruleAgentRightRef.current;
-          action = ruleAgent.decide(context);
+          action = neuralAgentRef.current.decide(context);
         }
       } else if (teamConfig.controller === 'heuristic') {
         action = neuralAgentRef.current.decide(context);

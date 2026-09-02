@@ -34,7 +34,8 @@
     "eval:opponents": "tsx training/eval_opponent_robustness.ts",
     "eval:ablations": "tsx training/eval_ablations.ts",
     "test:browser-parity": "tsx training/test_browser_inference_parity.ts",
-    "validate:policy": "tsx training/validate_learned_policy.ts"
+    "validate:policy": "tsx training/validate_learned_policy.ts",
+    "sync:contracts": "tsx scripts/sync_contracts.ts"
   },
   "dependencies": {
     "@google/genai": "latest",

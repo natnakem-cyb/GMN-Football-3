@@ -248,7 +248,7 @@ def evaluate_multi_agent_mappo(
     from training.mappo_networks import SharedActor
 
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    obs_dim = checkpoint.get("obs_dim", 115)
+    obs_dim = checkpoint.get("obs_dim", 127 if "actor" in checkpoint and checkpoint["actor"]["net.0.weight"].shape[1] == 127 else (checkpoint["actor"]["net.0.weight"].shape[1] if "actor" in checkpoint else 127))
     action_dim = checkpoint.get("action_dim", 19)
 
     actor = SharedActor(obs_dim=obs_dim, action_dim=action_dim, hidden=64)

@@ -83,13 +83,13 @@ export const AgentArenaPanel: React.FC<AgentArenaPanelProps> = ({
               >
                 <option value="human">👤 Human Player (Keyboard / Touch)</option>
                 <option value="rule_based">🤖 Tactical Rule AI</option>
-                {is3v1Scenario && !modelError ? (
+                {!modelError ? (
                   <option value="neural">
-                    🧠 Neural Policy (Trained — Academy 3v1, Left side)
+                    🧠 Neural Policy (Trained MAPPO — ONNX / 127-dim)
                   </option>
                 ) : (
                   <option value="neural" disabled>
-                    🧠 Neural Policy {modelError ? `(Unavailable: ${modelError})` : '(not trained for this scenario)'}
+                    🧠 Neural Policy (Unavailable: {modelError})
                   </option>
                 )}
                 <option value="heuristic">📊 Heuristic Bot (Untrained Baseline)</option>

@@ -135,8 +135,10 @@ def run_ippo_training(timesteps: int = 200000, checkpoint_name: str = None, resu
 
     models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "models"))
     logs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "logs"))
+    results_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "results"))
     os.makedirs(models_dir, exist_ok=True)
     os.makedirs(logs_dir, exist_ok=True)
+    os.makedirs(results_dir, exist_ok=True)
 
     print("\n1. Initializing Multi-Agent PettingZoo Environment & SuperSuit Vectorization...")
     pz_env = GMNMultiAgentEnv(scenario="academy_3_vs_1_with_keeper", auto_start_bridge=True)
