@@ -34,6 +34,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r training/requirements.txt
 
+    - name: Verify Contract Synchronization
+      run: |
+        npm run sync:contracts
+        # If the sync script generates a diff, fail the build
+        git diff --exit-code || (echo "Contracts are out of sync. Run 'npm run sync:contracts' and commit the changes." && exit 1)
+
     - name: Run TypeScript determinism and scenario tests
       run: npm test
 

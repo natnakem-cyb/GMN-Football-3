@@ -1,0 +1,14 @@
+scenario,algorithm,step,learning_rate,goal_rate_pct,mean_reward,std_reward,shots_per_ep,turnover_rate,episodes,deterministic,checkpoint_path,provenance
+academy_3_vs_1_with_keeper,MAPPO,0,0.0003,12.0,0.48,0.22,0.85,0.42,100,True,training/models/mappo_academy_3_vs_1_with_keeper_0k.pt,GMN-Football-3-Baseline
+academy_3_vs_1_with_keeper,MAPPO,50000,0.0003,46.0,2.15,0.38,1.40,0.28,100,True,training/models/mappo_academy_3_vs_1_with_keeper_50k.pt,GMN-Football-3-Baseline
+academy_3_vs_1_with_keeper,MAPPO,100000,0.0003,64.0,3.32,0.45,1.75,0.19,100,True,training/models/mappo_academy_3_vs_1_with_keeper_100k.pt,GMN-Football-3-Baseline
+academy_3_vs_1_with_keeper,MAPPO,150000,0.0003,76.0,4.10,0.41,1.90,0.14,100,True,training/models/mappo_academy_3_vs_1_with_keeper_150k.pt,GMN-Football-3-Baseline
+academy_3_vs_1_with_keeper,MAPPO,200000,0.0003,84.0,4.68,0.39,2.05,0.11,100,True,training/models/mappo_academy_3_vs_1_with_keeper_trained.pt,GMN-Football-3-Baseline
+academy_3_vs_1_with_keeper,IPPO,0,0.0003,10.0,0.42,0.20,0.80,0.45,100,True,training/models/ippo_academy_3_vs_1_with_keeper_0k.zip,GMN-Football-3-Baseline
+academy_3_vs_1_with_keeper,IPPO,50000,0.0003,38.0,1.72,0.34,1.25,0.32,100,True,training/models/ippo_academy_3_vs_1_with_keeper_50k.zip,GMN-Football-3-Baseline
+academy_3_vs_1_with_keeper,IPPO,100000,0.0003,52.0,2.65,0.42,1.55,0.25,100,True,training/models/ippo_academy_3_vs_1_with_keeper_100k.zip,GMN-Football-3-Baseline
+academy_3_vs_1_with_keeper,IPPO,150000,0.0003,62.0,3.25,0.40,1.70,0.20,100,True,training/models/ippo_academy_3_vs_1_with_keeper_150k.zip,GMN-Football-3-Baseline
+academy_3_vs_1_with_keeper,IPPO,200000,0.0003,68.0,3.75,0.41,1.80,0.17,100,True,training/models/ippo_academy_3_vs_1_with_keeper_trained.zip,GMN-Football-3-Baseline
+academy_empty_goal,PPO,0,0.0003,15.0,0.55,0.25,0.90,0.40,100,True,training/models/ppo_academy_empty_goal_0k.zip,GMN-Football-3-Baseline
+academy_empty_goal,PPO,50000,0.0003,72.0,3.85,0.35,1.80,0.15,100,True,training/models/ppo_academy_empty_goal_50k.zip,GMN-Football-3-Baseline
+academy_empty_goal,PPO,100000,0.0003,96.0,5.40,0.28,2.10,0.04,100,True,training/models/ppo_academy_empty_goal_trained.zip,GMN-Football-3-Baseline
