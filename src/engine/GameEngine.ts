@@ -498,7 +498,7 @@ export class GameEngine {
       }
 
       // Record snapshot to replay buffer
-      this.recordReplayFrame();
+      this.recordReplayFrame(eventsBefore);
     }
 
     // Generate RL observation & reward
@@ -1040,7 +1040,7 @@ export class GameEngine {
       const throwInTeam: TeamSide = this.ball.lastOwnerTeam === 'left' ? 'right' : 'left';
       this.ball.velocity = { x: 0, y: 0, z: 0 };
       this.ball.position.x = Math.max(PITCH.minX + 0.05, Math.min(PITCH.maxX - 0.05, this.ball.position.x));
-      this.ball.position.y = y > PITCH.maxY ? PITCH.maxY : PITCH.minY;
+      this.ball.position.y = y > PITCH.maxY ? PITCH.maxY - 0.05 : PITCH.minY + 0.05;
       this.ball.position.z = 0;
       this.ball.ownerId = null;
       this.recordEvent(
@@ -1148,10 +1148,13 @@ export class GameEngine {
     }
   }
 
-  private recordReplayFrame(): void {
+  private recordReplayFrame(eventsBefore?: number): void {
     if (this.replayBuffer.length >= this.maxReplayFrames) {
       this.replayBuffer.shift();
     }
+
+    const newEventsThisTick = eventsBefore !== undefined ? this.events.slice(eventsBefore) : [];
+    const event = newEventsThisTick.length > 0 ? newEventsThisTick[newEventsThisTick.length - 1] : undefined;
 
     const frame: ReplayFrame = {
       tick: this.tickCount,
@@ -1173,7 +1176,7 @@ export class GameEngine {
         hasBall: p.hasBall,
       })),
       score: { ...this.score },
-      event: this.events[this.events.length - 1],
+      ...(event ? { event } : {}),
     };
 
     this.replayBuffer.push(frame);

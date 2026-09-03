@@ -71,8 +71,16 @@ export const RLGymnasiumPanel: React.FC<RLGymnasiumPanelProps> = ({
               </div>
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-400">Checkpoint Reward:</span>
-                <span className="font-mono font-semibold text-emerald-400">
-                  +{(lastStepResult?.info.checkpointReward || 0).toFixed(4)}
+                <span
+                  className={`font-mono font-semibold ${
+                    (lastStepResult?.info.checkpointReward || 0) > 0
+                      ? 'text-emerald-400'
+                      : (lastStepResult?.info.checkpointReward || 0) < 0
+                      ? 'text-red-400'
+                      : 'text-slate-300'
+                  }`}
+                >
+                  {(lastStepResult?.info.checkpointReward || 0).toFixed(4)}
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs">

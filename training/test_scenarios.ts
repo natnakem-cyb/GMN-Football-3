@@ -132,6 +132,96 @@ try {
   console.error('  ✗ FAILED regression test for resetToKickoff:', err.message);
 }
 
+// Regression test for A1: Replay frame event field sticky bug
+// Verifies: run past a goal with no further events; only goal tick has event: 'goal', later ticks have no event
+totalTests++;
+console.log('\nValidating Regression A1: Replay frame sticky event isolation...');
+try {
+  const engine = new GameEngine();
+  engine.resetToKickoff(true, 12345);
+  engine.replayBuffer = [];
+  engine.events = [];
+
+  const emptyActionMap = new Map<string, AgentAction>();
+  engine.step(emptyActionMap, 1 / 60);
+  const frame0 = engine.replayBuffer[engine.replayBuffer.length - 1];
+  if (frame0.event !== undefined) {
+    throw new Error(`Expected frame 0 to have no event, got ${JSON.stringify(frame0.event)}`);
+  }
+
+  // Trigger goal event
+  engine.ball.position = { x: 1.05, y: 0, z: 0 };
+  engine.ball.velocity = { x: 0, y: 0, z: 0 };
+  engine.ball.ownerId = null;
+  engine.step(emptyActionMap, 1 / 60);
+  const goalFrameIdx = engine.replayBuffer.length - 1;
+  const goalFrame = engine.replayBuffer[goalFrameIdx];
+  if (!goalFrame.event || goalFrame.event.type !== 'goal') {
+    throw new Error(`Expected goal frame to have event.type === 'goal', got ${JSON.stringify(goalFrame.event)}`);
+  }
+
+  // Run 5 further ticks without any events
+  for (let i = 0; i < 5; i++) {
+    engine.ball.position = { x: 0, y: 0, z: 0 };
+    engine.ball.velocity = { x: 0, y: 0, z: 0 };
+    engine.ball.ownerId = null;
+    engine.step(emptyActionMap, 1 / 60);
+    const postGoalFrame = engine.replayBuffer[engine.replayBuffer.length - 1];
+    if (postGoalFrame.event !== undefined) {
+      throw new Error(
+        `Sticky event bug detected at tick +${i + 1}! Event was re-stamped: ${JSON.stringify(postGoalFrame.event)}`
+      );
+    }
+  }
+
+  console.log('  ✓ Successfully verified replay frames only capture events on the exact tick they occur.');
+  passedTests++;
+} catch (err: any) {
+  console.error('  ✗ FAILED regression test for replay sticky event:', err.message);
+}
+
+// Regression test for A2: Throw-in touchline 0.05 inset
+// Verifies: forcing ball out over touchline triggers exactly 1 out_of_bounds event without immediate re-trigger
+totalTests++;
+console.log('\nValidating Regression A2: Touchline throw-in rapid re-trigger prevention...');
+try {
+  const engine = new GameEngine();
+  engine.resetToKickoff(true, 54321);
+  engine.events = [];
+
+  const emptyActionMap = new Map<string, AgentAction>();
+
+  // Force ball over maxY touchline (e.g. y = 0.45, PITCH.maxY = 0.42)
+  engine.ball.position = { x: 0, y: 0.45, z: 0 };
+  engine.ball.velocity = { x: 0, y: 0, z: 0 };
+
+  // Step 1: Triggers throw-in and repositioning with 0.05 inset
+  engine.step(emptyActionMap, 1 / 60);
+
+  const initialOobEvents = engine.events.filter((e) => e.type === 'out_of_bounds');
+  if (initialOobEvents.length !== 1) {
+    throw new Error(`Expected exactly 1 out_of_bounds event, got ${initialOobEvents.length}`);
+  }
+
+  // Step next 10 ticks with zero velocity
+  for (let i = 0; i < 10; i++) {
+    engine.ball.velocity = { x: 0, y: 0, z: 0 };
+    engine.step(emptyActionMap, 1 / 60);
+  }
+
+  const finalOobEvents = engine.events.filter((e) => e.type === 'out_of_bounds');
+  if (finalOobEvents.length !== 1) {
+    throw new Error(
+      `Throw-in re-triggered! Expected 1 out_of_bounds event over 10 ticks, got ${finalOobEvents.length}`
+    );
+  }
+
+  console.log('  ✓ Successfully verified throw-in ball position inset prevents rapid re-trigger.');
+  passedTests++;
+} catch (err: any) {
+  console.error('  ✗ FAILED regression test for throw-in rapid re-trigger:', err.message);
+}
+
 console.log('\n====================================================');
 console.log(`Scenario Validation Summary: ${passedTests}/${totalTests} Scenarios Passed`);
 console.log('====================================================');

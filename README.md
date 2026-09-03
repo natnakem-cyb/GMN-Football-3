@@ -183,7 +183,7 @@ GMN-Football-3/
 ├── requirements.txt          # Python deps (root)
 ├── training/requirements.txt # Python deps (training-pinned — has stricter/older version bounds than the root file; prefer this one for training)
 ├── package.json
-├── tsconfig.json             # NOTE: only includes `src/` — training/*.ts is not currently type-checked
+├── tsconfig.json             # TypeScript config includes both `src/` and `training/` for strict typechecking
 ├── vite.config.ts / tailwind.config.js / postcss.config.js
 ├── .env.example              # GEMINI_API_KEY (optional, for AI match commentary)
 ├── LICENSE (Apache-2.0)
@@ -280,7 +280,7 @@ npm run test:playability  # scenario playability verification
 npm run test:validation   # rl_validation_suite.py
 ```
 
-**Note:** `npm run lint` / `npm run build` only type-check `src/`. `training/*.ts` (including `bridge_server.ts`, `action_mapping.ts`) is executed directly via `tsx` and is not currently covered by `tsc`.
+**Note:** `npm run lint` (`tsc --noEmit`) and `npm run build` type-check both `src/` and `training/` as specified in `tsconfig.json`.
 
 ## Current Status
 

@@ -43,7 +43,7 @@ export default function App() {
   const ruleAgentLeftRef = useRef<RuleBasedAgent>(new RuleBasedAgent('rule_left', 'Rule AI Left', 'medium'));
   const ruleAgentRightRef = useRef<RuleBasedAgent>(new RuleBasedAgent('rule_right', 'Rule AI Right', 'medium'));
   const neuralAgentRef = useRef<NeuralHeuristicAgent>(new NeuralHeuristicAgent());
-  const trainedAgentRef = useRef<TrainedPolicyAgent | null>(null);
+  const trainedAgentRef = useRef<TrainedPolicyAgent | null>(new TrainedPolicyAgent('trained_ppo'));
   const scriptedAgentRef = useRef<ScriptedScenarioAgent>(new ScriptedScenarioAgent());
 
   const [activeTab, setActiveTab] = useState<TabType>('arena');
@@ -53,13 +53,26 @@ export default function App() {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isReplayMode, setIsReplayMode] = useState(false);
   const [replayFrameIndex, setReplayFrameIndex] = useState(0);
-  const [isModelLoading, setIsModelLoading] = useState(true);
+  const [isModelLoading, setIsModelLoading] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
   const [neuralFallbackActive, setNeuralFallbackActive] = useState(false);
 
   // Engine React State Bridge
   const [, setRenderTrigger] = useState(0);
-  const [lastStepResult, setLastStepResult] = useState<RLStepResult | null>(null);
+  const [lastStepResult, setLastStepResult] = useState<RLStepResult | null>(() => {
+    const obs = engineRef.current.getObservation();
+    return {
+      observation: obs,
+      reward: 0,
+      terminated: false,
+      truncated: false,
+      info: {
+        score: { ...engineRef.current.score },
+        checkpointReward: 0,
+        ballDistanceToGoal: Math.hypot(engineRef.current.ball.position.x - 1.0, engineRef.current.ball.position.y),
+      },
+    };
+  });
 
   const engine = engineRef.current;
 
@@ -222,6 +235,18 @@ export default function App() {
     } else {
       engine.resetToKickoff();
     }
+    const obs = engine.getObservation();
+    setLastStepResult({
+      observation: obs,
+      reward: 0,
+      terminated: false,
+      truncated: false,
+      info: {
+        score: { ...engine.score },
+        checkpointReward: 0,
+        ballDistanceToGoal: Math.hypot(engine.ball.position.x - 1.0, engine.ball.position.y),
+      },
+    });
     setRenderTrigger((prev) => prev + 1);
   }, [engine]);
 
@@ -248,6 +273,18 @@ export default function App() {
     } else if (engine.teamLeftConfig.controller === 'neural') {
       engine.teamLeftConfig.controller = 'human';
     }
+    const obs = engine.getObservation();
+    setLastStepResult({
+      observation: obs,
+      reward: 0,
+      terminated: false,
+      truncated: false,
+      info: {
+        score: { ...engine.score },
+        checkpointReward: 0,
+        ballDistanceToGoal: Math.hypot(engine.ball.position.x - 1.0, engine.ball.position.y),
+      },
+    });
     setIsPlaying(true);
     setIsReplayMode(false);
     setActiveTab('arena');
@@ -260,6 +297,18 @@ export default function App() {
     if (engine.teamLeftConfig.controller === 'neural') {
       engine.teamLeftConfig.controller = 'human';
     }
+    const obs = engine.getObservation();
+    setLastStepResult({
+      observation: obs,
+      reward: 0,
+      terminated: false,
+      truncated: false,
+      info: {
+        score: { ...engine.score },
+        checkpointReward: 0,
+        ballDistanceToGoal: Math.hypot(engine.ball.position.x - 1.0, engine.ball.position.y),
+      },
+    });
     setIsPlaying(true);
     setIsReplayMode(false);
     setActiveTab('arena');
