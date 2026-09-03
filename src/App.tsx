@@ -18,6 +18,10 @@ import { TacticalAnalytics } from './components/TacticalAnalytics';
 import { RLGymnasiumPanel } from './components/RLGymnasiumPanel';
 import { GeminiTacticalCoach } from './components/GeminiTacticalCoach';
 import { ControlsHelpModal } from './components/ControlsHelpModal';
+import { TrainingTelemetryDashboard } from './components/TrainingTelemetryDashboard';
+import { PolicyActionOverlay } from './components/PolicyActionOverlay';
+import { MultiAgentCreditMatrix } from './components/MultiAgentCreditMatrix';
+import { TrainingTelemetryService } from './engine/TrainingTelemetryService';
 
 import {
   Trophy,
@@ -33,9 +37,10 @@ import {
   RefreshCw,
   Shield,
   Layers,
+  Activity,
 } from 'lucide-react';
 
-type TabType = 'arena' | 'academy' | 'replay' | 'gymnasium' | 'analytics' | 'coach';
+type TabType = 'arena' | 'academy' | 'replay' | 'training' | 'gymnasium' | 'analytics' | 'coach';
 
 export default function App() {
   const engineRef = useRef<GameEngine>(new GameEngine());
@@ -56,6 +61,7 @@ export default function App() {
   const [isModelLoading, setIsModelLoading] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
   const [neuralFallbackActive, setNeuralFallbackActive] = useState(false);
+  const [showAttentionVectors, setShowAttentionVectors] = useState(true);
 
   // Engine React State Bridge
   const [, setRenderTrigger] = useState(0);
@@ -315,9 +321,9 @@ export default function App() {
     setRenderTrigger((prev) => prev + 1);
   };
 
-  // On-screen action trigger (for mouse / touch)
-  const handleVirtualAction = (type: ActionType) => {
-    humanAgentRef.current.triggerAction({ type, power: 0.85 });
+  // On-screen action trigger (for mouse / touch / policy overlay)
+  const handleVirtualAction = (action: ActionType | number) => {
+    humanAgentRef.current.triggerAction({ type: action as ActionType, power: 0.85 });
   };
 
   // Current Replay Frame if in replay mode
@@ -345,6 +351,26 @@ export default function App() {
 
   const displayScore = currentReplayFrame ? currentReplayFrame.score : engine.score;
   const displayTime = currentReplayFrame ? currentReplayFrame.matchTimeSeconds : engine.matchTimeSeconds;
+
+  // Real-time Neural Policy Evaluation & Cooperative Multi-Agent Credit Decomposition
+  const activeControlledPlayer =
+    engine.players.find((p) => p.id === engine.controlledPlayerId) ||
+    engine.players.find((p) => p.team === 'left') ||
+    null;
+
+  const policyDistribution = activeControlledPlayer
+    ? TrainingTelemetryService.getInstance().evaluateAgentPolicy(
+        activeControlledPlayer,
+        engine.players,
+        engine.ball,
+        trainedAgentRef.current
+      )
+    : null;
+
+  const agentCreditMetrics = TrainingTelemetryService.getInstance().computeMultiAgentCredits(
+    engine.players,
+    engine.ball
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-slate-950">
@@ -405,6 +431,18 @@ export default function App() {
               }`}
             >
               <Film className="w-3.5 h-3.5" /> Replay Studio
+            </button>
+
+            <button
+              id="tab-training"
+              onClick={() => setActiveTab('training')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                activeTab === 'training'
+                  ? 'bg-purple-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5" /> Training Cockpit
             </button>
 
             <button
@@ -477,12 +515,25 @@ export default function App() {
             controlledPlayerId={engine.controlledPlayerId}
             cameraMode="full"
             showRadar={showRadar}
+            policyDistribution={policyDistribution}
+            showAttentionVectors={showAttentionVectors}
             onPlayerClick={(id) => {
               const p = engine.players.find((pl) => pl.id === id);
               if (p && p.team === 'left') {
                 engine.controlledPlayerId = p.id;
                 setRenderTrigger((prev) => prev + 1);
               }
+            }}
+          />
+
+          {/* Neural Policy Inference & Attention Vectors HUD */}
+          <PolicyActionOverlay
+            distribution={policyDistribution}
+            showAttentionVectors={showAttentionVectors}
+            onToggleAttentionVectors={() => setShowAttentionVectors(!showAttentionVectors)}
+            isNeuralActive={engine.teamLeftConfig.controller === 'neural'}
+            onSelectAction={(actionIdx) => {
+              handleVirtualAction(actionIdx);
             }}
           />
 
@@ -543,28 +594,54 @@ export default function App() {
 
         {/* Tab Specific Views */}
         {activeTab === 'arena' && (
-          <AgentArenaPanel
-            teamLeft={engine.teamLeftConfig}
-            teamRight={engine.teamRightConfig}
-            is3v1Scenario={engine.activeScenario?.id === 'academy_3_vs_1_with_keeper' || engine.players.filter((p) => p.team === 'left').length === 3}
-            isModelLoading={isModelLoading}
-            modelError={modelError}
-            onUpdateTeamLeft={(cfg) => {
-              Object.assign(engine.teamLeftConfig, cfg);
-              if (cfg.formation) {
-                engine.initDefaultMatch(cfg.formation, engine.teamRightConfig.formation, 11);
-              }
-              setRenderTrigger((prev) => prev + 1);
-            }}
-            onUpdateTeamRight={(cfg) => {
-              Object.assign(engine.teamRightConfig, cfg);
-              if (cfg.formation) {
-                engine.initDefaultMatch(engine.teamLeftConfig.formation, cfg.formation, 11);
-              }
-              setRenderTrigger((prev) => prev + 1);
-            }}
-            onApplyPresetMatchup={handleApplyPreset}
-          />
+          <div className="space-y-4">
+            <AgentArenaPanel
+              teamLeft={engine.teamLeftConfig}
+              teamRight={engine.teamRightConfig}
+              is3v1Scenario={engine.activeScenario?.id === 'academy_3_vs_1_with_keeper' || engine.players.filter((p) => p.team === 'left').length === 3}
+              isModelLoading={isModelLoading}
+              modelError={modelError}
+              onUpdateTeamLeft={(cfg) => {
+                Object.assign(engine.teamLeftConfig, cfg);
+                if (cfg.formation) {
+                  engine.initDefaultMatch(cfg.formation, engine.teamRightConfig.formation, 11);
+                }
+                setRenderTrigger((prev) => prev + 1);
+              }}
+              onUpdateTeamRight={(cfg) => {
+                Object.assign(engine.teamRightConfig, cfg);
+                if (cfg.formation) {
+                  engine.initDefaultMatch(engine.teamLeftConfig.formation, cfg.formation, 11);
+                }
+                setRenderTrigger((prev) => prev + 1);
+              }}
+              onApplyPresetMatchup={handleApplyPreset}
+            />
+
+            {/* Cooperative Multi-Agent Credit Matrix */}
+            <MultiAgentCreditMatrix
+              metrics={agentCreditMetrics}
+              selectedPlayerId={engine.controlledPlayerId}
+              onSelectAgent={(pid) => {
+                engine.controlledPlayerId = pid;
+                setRenderTrigger((prev) => prev + 1);
+              }}
+            />
+          </div>
+        )}
+
+        {activeTab === 'training' && (
+          <div className="space-y-5">
+            <TrainingTelemetryDashboard />
+            <MultiAgentCreditMatrix
+              metrics={agentCreditMetrics}
+              selectedPlayerId={engine.controlledPlayerId}
+              onSelectAgent={(pid) => {
+                engine.controlledPlayerId = pid;
+                setRenderTrigger((prev) => prev + 1);
+              }}
+            />
+          </div>
         )}
 
         {activeTab === 'academy' && (

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Ball, Player, TeamConfig, TeamSide, Vector2D } from '../types/football';
 import { PITCH } from '../engine/Rules';
+import { PolicyActionDistribution } from '../types/telemetry';
 
 interface PitchCanvasProps {
   ball: Ball;
@@ -12,6 +13,8 @@ interface PitchCanvasProps {
   onPlayerClick?: (playerId: string) => void;
   onPitchClick?: (pos: Vector2D) => void;
   showRadar?: boolean;
+  policyDistribution?: PolicyActionDistribution | null;
+  showAttentionVectors?: boolean;
 }
 
 export const PitchCanvas: React.FC<PitchCanvasProps> = ({
@@ -24,6 +27,8 @@ export const PitchCanvas: React.FC<PitchCanvasProps> = ({
   onPlayerClick,
   onPitchClick,
   showRadar = true,
+  policyDistribution,
+  showAttentionVectors = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -193,6 +198,104 @@ export const PitchCanvas: React.FC<PitchCanvasProps> = ({
       ctx.stroke();
     }
 
+    // 5.5 Draw Neural Policy Spatial Attention & Action Cones
+    if (showAttentionVectors && policyDistribution) {
+      const activePlayer = players.find((p) => p.id === policyDistribution.playerId);
+      if (activePlayer) {
+        const apx = toCanvasX(activePlayer.position.x);
+        const apy = toCanvasY(activePlayer.position.y);
+
+        // 5.5.1 Passing attention vector to target receiver
+        if (policyDistribution.attention?.targetPos) {
+          const tpx = toCanvasX(policyDistribution.attention.targetPos.x);
+          const tpy = toCanvasY(policyDistribution.attention.targetPos.y);
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.setLineDash([5, 5]);
+          ctx.moveTo(apx, apy);
+          ctx.lineTo(tpx, tpy);
+          ctx.strokeStyle = 'rgba(6, 182, 212, 0.85)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Glowing receiver target marker
+          ctx.fillStyle = 'rgba(6, 182, 212, 0.3)';
+          ctx.beginPath();
+          ctx.arc(tpx, tpy, 16, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#06b6d4';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // Lane clearance label badge
+          const midX = (apx + tpx) / 2;
+          const midY = (apy + tpy) / 2;
+          const clearanceText = `Pass Lane: ${policyDistribution.attention.passClearanceProb}%`;
+          ctx.font = 'bold 9px "Plus Jakarta Sans", sans-serif';
+          const textW = ctx.measureText(clearanceText).width;
+
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+          ctx.fillRect(midX - textW / 2 - 4, midY - 7, textW + 8, 14);
+          ctx.strokeStyle = '#06b6d4';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(midX - textW / 2 - 4, midY - 7, textW + 8, 14);
+
+          ctx.fillStyle = '#22d3ee';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(clearanceText, midX, midY);
+          ctx.restore();
+        }
+
+        // 5.5.2 Shot corridor to opponent goal
+        if (policyDistribution.attention?.shotAngleClearance && activePlayer.position.x > 0.1) {
+          const goalTopX = toCanvasX(1.0);
+          const goalTopY = toCanvasY(-0.07);
+          const goalBotX = toCanvasX(1.0);
+          const goalBotY = toCanvasY(0.07);
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(apx, apy);
+          ctx.lineTo(goalTopX, goalTopY);
+          ctx.lineTo(goalBotX, goalBotY);
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(245, 158, 11, 0.1)';
+          ctx.fill();
+
+          ctx.setLineDash([3, 3]);
+          ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // 5.5.3 Centralized Critic Value V(s) Ring around player
+        const val = policyDistribution.valueEstimate;
+        const ringColor = val > 0.3 ? '#10b981' : val > -0.1 ? '#f59e0b' : '#ef4444';
+        ctx.save();
+        ctx.strokeStyle = ringColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(apx, apy, 20, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Value text tag
+        const vText = `V(s): ${val >= 0 ? `+${val}` : val}`;
+        ctx.font = 'bold 9px "Plus Jakarta Sans", sans-serif';
+        const vTextW = ctx.measureText(vText).width;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+        ctx.fillRect(apx - vTextW / 2 - 3, apy + 20, vTextW + 6, 12);
+        ctx.fillStyle = ringColor;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(vText, apx, apy + 26);
+        ctx.restore();
+      }
+    }
+
     // 6. Draw Players
     const playerRadiusPx = Math.max(9, PITCH.playerRadius * scaleY);
 
@@ -340,7 +443,17 @@ export const PitchCanvas: React.FC<PitchCanvasProps> = ({
       ctx.arc(rbx, rby, 2.5, 0, Math.PI * 2);
       ctx.fill();
     }
-  }, [dimensions, ball, players, teamLeftConfig, teamRightConfig, controlledPlayerId, showRadar]);
+  }, [
+    dimensions,
+    ball,
+    players,
+    teamLeftConfig,
+    teamRightConfig,
+    controlledPlayerId,
+    showRadar,
+    policyDistribution,
+    showAttentionVectors,
+  ]);
 
   // Click on Canvas handler
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {

@@ -420,6 +420,14 @@ wss.on('connection', (ws: WebSocket) => {
         } else if (parsed.type === 'step_multi') {
           const multiResult = bridge.stepMulti(parsed.actions);
           ws.send(JSON.stringify(multiResult));
+        } else if (parsed.type === 'telemetry_metrics') {
+          // Broadcast training telemetry to all dashboard subscribers
+          wss.clients.forEach((client) => {
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify(parsed));
+            }
+          });
+          ws.send(JSON.stringify({ status: 'broadcast_ok' }));
         }
       }
     } catch (err: any) {
