@@ -9,7 +9,6 @@ One authoritative TypeScript game engine drives both an interactive browser matc
 
 **Status:** RL-ready simulation and research platform, with a real deployed policy (MAPPO, ONNX) driving in-browser gameplay for one scenario. There is not yet a policy trained to play a full match — see [Current Status](#current-status) for exactly what has and hasn't been trained so far.
 
-> This README was verified line-by-line against the current codebase (not just against an earlier snapshot or the project's own comments) as of this writing. Where prior documentation for this project was found to be stale, it's corrected here — see [Corrections vs. Prior Documentation](#corrections-vs-prior-documentation).
 
 Table of Contents
 -----------------
