@@ -1,11 +1,13 @@
 import { ActionType, AgentAction, Vector2D } from '../types/football';
 import { AgentDecisionContext, IAgent } from './BaseAgent';
 import { Vec2 } from '../engine/Vector';
+import { SeededRNG } from '../engine/SeededRNG';
 
 export class NeuralHeuristicAgent implements IAgent {
   id: string;
   name: string;
   type: 'neural' = 'neural';
+  private rng: SeededRNG;
 
   // Observable neural layer activations for UI inspection
   public lastActivations: {
@@ -20,16 +22,29 @@ export class NeuralHeuristicAgent implements IAgent {
     actionProbabilities: [],
   };
 
-  private weights = {
-    // 8 inputs -> 12 hidden1 -> 6 hidden2 -> 5 action outputs
-    w1: Array.from({ length: 8 }, () => Array.from({ length: 12 }, () => (Math.random() - 0.5) * 0.8)),
-    w2: Array.from({ length: 12 }, () => Array.from({ length: 6 }, () => (Math.random() - 0.5) * 0.8)),
-    w3: Array.from({ length: 6 }, () => Array.from({ length: 5 }, () => (Math.random() - 0.5) * 0.8)),
+  private weights: {
+    w1: number[][];
+    w2: number[][];
+    w3: number[][];
   };
 
-  constructor(id = 'neural_heuristic_v1', name = 'Heuristic Bot (Untrained Baseline)') {
+  constructor(id = 'neural_heuristic_v1', name = 'Heuristic Bot (Untrained Baseline)', seed = 1337) {
     this.id = id;
     this.name = name;
+    this.rng = new SeededRNG(seed);
+
+    // Deterministic weights generated via SeededRNG
+    const initRng = new SeededRNG(seed);
+    this.weights = {
+      // 8 inputs -> 12 hidden1 -> 6 hidden2 -> 5 action outputs
+      w1: Array.from({ length: 8 }, () => Array.from({ length: 12 }, () => (initRng.next() - 0.5) * 0.8)),
+      w2: Array.from({ length: 12 }, () => Array.from({ length: 6 }, () => (initRng.next() - 0.5) * 0.8)),
+      w3: Array.from({ length: 6 }, () => Array.from({ length: 5 }, () => (initRng.next() - 0.5) * 0.8)),
+    };
+  }
+
+  public setSeed(seed: number): void {
+    this.rng.setSeed(seed);
   }
 
   decide(context: AgentDecisionContext): AgentAction {
@@ -122,7 +137,8 @@ export class NeuralHeuristicAgent implements IAgent {
     const chosenAction = actionCategories[maxProbIdx];
 
     if (chosenAction === ActionType.SHOT) {
-      const shootDir = Vec2.sub({ x: opponentGoalX, y: (Math.random() - 0.5) * 0.08 }, player.position);
+      const rngVal = context.rng ? context.rng.next() : this.rng.next();
+      const shootDir = Vec2.sub({ x: opponentGoalX, y: (rngVal - 0.5) * 0.08 }, player.position);
       return {
         type: ActionType.SHOT,
         direction: Vec2.normalize(shootDir),

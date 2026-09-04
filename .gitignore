@@ -1,5 +1,12 @@
 # When updating this file don't forget to update MANIFEST.in
 
+# Node.js
+node_modules/
+.npm/
+
+# AI Studio
+.aistudio/
+
 # Python related files
 build/
 *.egg-info/

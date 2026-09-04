@@ -1,6 +1,7 @@
 import { ActionType, AgentAction, Vector2D } from '../types/football';
 import { AgentDecisionContext, IAgent } from './BaseAgent';
 import { Vec2 } from '../engine/Vector';
+import { SeededRNG } from '../engine/SeededRNG';
 
 export class HumanAgent implements IAgent {
   id = 'human_player';
@@ -10,12 +11,18 @@ export class HumanAgent implements IAgent {
   private pressedKeys = new Set<string>();
   private virtualMovement: Vector2D = { x: 0, y: 0 };
   private pendingAction: AgentAction | null = null;
+  private rng: SeededRNG = new SeededRNG(42);
 
-  constructor() {
+  constructor(seed = 42) {
+    this.rng = new SeededRNG(seed);
     if (typeof window !== 'undefined') {
       window.addEventListener('keydown', this.handleKeyDown);
       window.addEventListener('keyup', this.handleKeyUp);
     }
+  }
+
+  public setSeed(seed: number): void {
+    this.rng.setSeed(seed);
   }
 
   destroy(): void {
@@ -80,7 +87,8 @@ export class HumanAgent implements IAgent {
       if (act.type === ActionType.SHOT) {
         // Target opponent goal
         const targetGoalX = player.team === 'left' ? 1.0 : -1.0;
-        const shootDir = Vec2.sub({ x: targetGoalX, y: (Math.random() - 0.5) * 0.08 }, player.position);
+        const rngVal = context.rng ? context.rng.next() : this.rng.next();
+        const shootDir = Vec2.sub({ x: targetGoalX, y: (rngVal - 0.5) * 0.08 }, player.position);
         return {
           type: ActionType.SHOT,
           direction: Vec2.normalize(shootDir),

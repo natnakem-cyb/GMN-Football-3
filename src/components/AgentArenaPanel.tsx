@@ -1,6 +1,6 @@
 import React from 'react';
 import { FormationType, TeamConfig } from '../types/football';
-import { Bot, User, Brain, Sliders, Shield, Award } from 'lucide-react';
+import { Bot, User, Brain, Sliders, Shield, Award, AlertTriangle } from 'lucide-react';
 
 interface AgentArenaPanelProps {
   teamLeft: TeamConfig;
@@ -95,6 +95,12 @@ export const AgentArenaPanel: React.FC<AgentArenaPanelProps> = ({
                 <option value="heuristic">📊 Heuristic Bot (Untrained Baseline)</option>
                 <option value="scripted">📜 Scripted Scenario Bot</option>
               </select>
+              {modelError && (
+                <div className="mt-2 p-2 rounded-lg bg-amber-950/80 border border-amber-600/80 text-[11px] text-amber-300 flex items-center gap-1.5 font-semibold animate-fadeIn">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Neural Model Unavailable – Reverting to Rule-Based ({modelError})</span>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">

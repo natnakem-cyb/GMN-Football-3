@@ -1,4 +1,5 @@
 import http from 'http';
+import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { GameEngine } from '../src/engine/GameEngine';
 import { ACADEMY_SCENARIOS } from '../src/scenarios/ScenarioRegistry';
@@ -16,13 +17,27 @@ import { Vec2 } from '../src/engine/Vector';
 import { RuleBasedAgent } from '../src/agents/RuleBasedAgent';
 import { ObservationEncoder } from '../src/engine/ObservationEncoder';
 
+import { CheckpointService } from './CheckpointService';
+import { TrainingJobService } from './TrainingJobService';
+
 const PORT = parseInt(process.env.GMN_BRIDGE_PORT || '5050', 10);
-const HOST = '127.0.0.1';
+const HOST = process.env.GMN_BRIDGE_HOST || '0.0.0.0';
 
 export class GMNBridgeService {
   private engine: GameEngine;
   private botAgents: Map<string, RuleBasedAgent>;
   private scenarioMap: Map<string, ScenarioConfig>;
+  public currentScenarioName = 'academy_empty_goal';
+
+  // Live RL Training & Telemetry Tracking
+  public totalSteps = 0;
+  public episodeCount = 0;
+  public currentEpisodeReward = 0;
+  public currentEpisodeSteps = 0;
+  public policyLoss = 0.038;
+  public valueLoss = 0.114;
+  public entropy = 2.82;
+  public approxKl = 0.007;
 
   constructor() {
     this.engine = new GameEngine();
@@ -42,6 +57,11 @@ export class GMNBridgeService {
   }
 
   public reset(scenarioName = 'academy_empty_goal', seed?: number) {
+    this.currentScenarioName = scenarioName;
+    this.currentEpisodeReward = 0;
+    this.currentEpisodeSteps = 0;
+    this.episodeCount++;
+
     const sc = this.scenarioMap.get(scenarioName) || this.scenarioMap.get('academy_empty_goal');
     if (sc) {
       this.engine.loadScenario(sc, seed);
@@ -259,9 +279,115 @@ const server = http.createServer((req, res) => {
     try {
       const parsedBody = body ? JSON.parse(body) : {};
 
-      if (req.method === 'GET' && (req.url === '/' || req.url === '/info' || req.url === '/health')) {
+      const urlPath = (req.url || '').split('?')[0];
+
+      if (req.method === 'GET' && (urlPath === '/' || urlPath === '/info' || urlPath === '/health')) {
         res.writeHead(200);
         res.end(JSON.stringify(bridge.getInfo()));
+        return;
+      }
+
+      // --- TRAINING JOB MANAGEMENT API ---
+      if (req.method === 'GET' && urlPath === '/api/training/status') {
+        res.writeHead(200);
+        res.end(JSON.stringify(TrainingJobService.getStatus()));
+        return;
+      }
+
+      if (req.method === 'POST' && urlPath === '/api/training/start') {
+        try {
+          const job = TrainingJobService.startJob({
+            algorithm: parsedBody.algorithm || 'mappo',
+            scenario: parsedBody.scenario || 'academy_3_vs_1_with_keeper',
+            timesteps: parseInt(parsedBody.timesteps, 10) || 1000,
+            resumeFrom: parsedBody.resumeFrom || undefined,
+          });
+          res.writeHead(200);
+          res.end(JSON.stringify({ success: true, message: 'Training job started', job }));
+        } catch (err: any) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ success: false, error: err.message || String(err) }));
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && urlPath === '/api/training/stop') {
+        const stopped = TrainingJobService.stopJob();
+        res.writeHead(200);
+        res.end(JSON.stringify({ success: stopped, message: stopped ? 'Training stopped' : 'No job was running' }));
+        return;
+      }
+
+      if (req.method === 'POST' && urlPath === '/api/training/export') {
+        const checkpoint = parsedBody.checkpoint || 'training/models/mappo_academy_3_vs_1_with_keeper_trained.pt';
+        const scenario = parsedBody.scenario || 'academy_3_vs_1_with_keeper';
+        const algorithm = parsedBody.algorithm || 'MAPPO';
+        const output = parsedBody.output || `public/models/mappo_${scenario}_${Date.now()}.onnx`;
+
+        TrainingJobService.handleAutomaticExport({
+          id: `export_${Date.now()}`,
+          config: { algorithm: algorithm.toLowerCase() as any, scenario, timesteps: 0 },
+          status: 'running',
+          startTime: Date.now(),
+          currentStep: 0,
+          totalSteps: 0,
+          latestMetrics: null,
+          recentLogs: [],
+        })
+          .then((result) => {
+            res.writeHead(200);
+            res.end(JSON.stringify({ success: true, result }));
+          })
+          .catch((err) => {
+            res.writeHead(500);
+            res.end(JSON.stringify({ success: false, error: err.message || String(err) }));
+          });
+        return;
+      }
+
+      // --- CHECKPOINT FILE MANAGEMENT API ---
+      if (req.method === 'GET' && urlPath === '/api/checkpoints') {
+        const checkpoints = CheckpointService.listCheckpoints();
+        res.writeHead(200);
+        res.end(JSON.stringify({ checkpoints }));
+        return;
+      }
+
+      if ((req.method === 'POST' && urlPath === '/api/checkpoints/delete') || (req.method === 'DELETE' && urlPath.startsWith('/api/checkpoints/'))) {
+        const filename = parsedBody.filename || path.basename(urlPath);
+        const deleteSourcePt = !!parsedBody.deleteSourcePt;
+        try {
+          const result = CheckpointService.deleteCheckpoint(filename, deleteSourcePt);
+          res.writeHead(200);
+          res.end(JSON.stringify(result));
+        } catch (err: any) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ success: false, error: err.message || String(err) }));
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && urlPath === '/api/checkpoints/upload') {
+        try {
+          const filename = parsedBody.filename || `custom_model_${Date.now()}.onnx`;
+          const base64 = parsedBody.base64Data || '';
+          if (!base64) {
+            res.writeHead(400);
+            res.end(JSON.stringify({ success: false, error: 'No base64Data provided' }));
+            return;
+          }
+          const buf = Buffer.from(base64, 'base64');
+          const saved = CheckpointService.saveUploadedCheckpoint(filename, buf, {
+            scenario: parsedBody.scenario,
+            algorithm: parsedBody.algorithm,
+            timesteps: parsedBody.timesteps,
+          });
+          res.writeHead(200);
+          res.end(JSON.stringify({ success: true, checkpoint: saved }));
+        } catch (err: any) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ success: false, error: err.message || String(err) }));
+        }
         return;
       }
 
@@ -388,6 +514,7 @@ export function encodeMultiStepBinary(multiResult: ReturnType<typeof bridge.step
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws: WebSocket) => {
+  TrainingJobService.registerWebSocket(ws);
   ws.on('message', (data: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
     try {
       if (isBinary) {

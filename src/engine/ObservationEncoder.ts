@@ -7,9 +7,18 @@ import {
   BASE_OBSERVATION_DIM,
   ROLE_DIM,
   ROLE_VOCABULARY,
+  inferPlayerRole,
+  validateObservationVector,
 } from './Contract';
 
-export { OBSERVATION_DIM, OBSERVATION_SCHEMA_VERSION, BASE_OBSERVATION_DIM, ROLE_DIM };
+export {
+  OBSERVATION_DIM,
+  OBSERVATION_SCHEMA_VERSION,
+  BASE_OBSERVATION_DIM,
+  ROLE_DIM,
+  inferPlayerRole,
+  validateObservationVector,
+};
 
 export class ObservationEncoder {
   /**
@@ -137,15 +146,17 @@ export class ObservationEncoder {
     }
 
     // 115..126 (Length 12): Self Agent Role One-Hot over ROLE_VOCABULARY
-    const viewpointPlayer = viewpointPlayerId ? players.find((p) => p.id === viewpointPlayerId) : leftPlayers[0];
-    const role = viewpointPlayer?.role;
+    // Computed dynamically from match state so role features are never left zero-padded
+    const viewpointPlayer = viewpointPlayerId ? players.find((p) => p.id === viewpointPlayerId) : (leftPlayers[0] || players[0] || null);
+    const resolvedRole = inferPlayerRole(viewpointPlayer);
     for (let r = 0; r < ROLE_VOCABULARY.length; r++) {
-      rawVector.push(role === ROLE_VOCABULARY[r] ? 1.0 : 0.0);
+      rawVector.push(resolvedRole === ROLE_VOCABULARY[r] ? 1.0 : 0.0);
     }
 
-    if (rawVector.length !== OBSERVATION_DIM) {
+    const validation = validateObservationVector(rawVector);
+    if (!validation.valid) {
       throw new Error(
-        `[ObservationEncoder Contract Violation] Encoded vector length mismatch: expected ${OBSERVATION_DIM}, got ${rawVector.length}`
+        `[ObservationEncoder Contract Violation] ${validation.reason}`
       );
     }
 

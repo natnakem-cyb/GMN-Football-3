@@ -299,13 +299,24 @@ export class TrainingTelemetryService {
     this.notify();
   }
 
+  public liveLogs: string[] = [];
+  public activeJob: any = null;
+  public checkpoints: any[] = [];
+  public isRefreshingCheckpoints: boolean = false;
+
   /**
-   * Connects to the local Python RL Training Bridge over WebSocket (ws://127.0.0.1:5050)
-   * to stream live MAPPO training telemetry from PyTorch training scripts into the cockpit.
+   * Connects to the local Python RL Training Bridge over WebSocket (via /ws proxy or ws://127.0.0.1:5050)
+   * to stream live MAPPO/PPO/IPPO training telemetry and logs from PyTorch scripts into the UI.
    */
   public connectWebSocket(url?: string): void {
-    if (url) this.wsUrl = url;
     if (typeof window === 'undefined') return;
+
+    if (url) {
+      this.wsUrl = url;
+    } else if (!this.wsUrl || this.wsUrl.includes('localhost') || this.wsUrl.includes('127.0.0.1')) {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      this.wsUrl = `${proto}//${window.location.host}/ws`;
+    }
 
     if (this.ws) {
       try {
@@ -324,6 +335,8 @@ export class TrainingTelemetryService {
       socket.onopen = () => {
         this.isWsConnected = true;
         this.wsStatus = 'connected';
+        socket.send(JSON.stringify({ type: 'subscribe_training' }));
+        this.refreshCheckpoints();
         this.notify();
       };
 
@@ -331,8 +344,44 @@ export class TrainingTelemetryService {
         try {
           if (typeof event.data === 'string') {
             const parsed = JSON.parse(event.data);
-            if (parsed.type === 'telemetry_metrics' || parsed.type === 'training_metrics') {
-              this.ingestSnapshot(parsed.snapshot || parsed.data || parsed, parsed.hardware);
+            const msgType = parsed.type;
+
+            if (msgType === 'TRAINING_STATUS') {
+              this.activeJob = parsed.data?.currentJob || null;
+              if (parsed.data?.isRunning) {
+                this.isTrainingActive = true;
+              }
+              if (parsed.data?.recentLogs && Array.isArray(parsed.data.recentLogs)) {
+                this.liveLogs = parsed.data.recentLogs;
+              }
+              if (parsed.data?.latestMetrics) {
+                this.ingestSnapshot(parsed.data.latestMetrics);
+              }
+              this.notify();
+            } else if (msgType === 'TRAINING_STARTED') {
+              this.activeJob = parsed.data;
+              this.isTrainingActive = true;
+              this.notify();
+            } else if (msgType === 'TRAINING_STDOUT') {
+              const line = parsed.data?.line;
+              if (line) {
+                this.liveLogs.push(line);
+                if (this.liveLogs.length > 500) {
+                  this.liveLogs.shift();
+                }
+                this.notify();
+              }
+            } else if (msgType === 'TRAINING_METRICS' || msgType === 'telemetry_metrics' || msgType === 'training_metrics') {
+              const metrics = parsed.data || parsed.snapshot || parsed;
+              this.ingestSnapshot(metrics, parsed.hardware);
+            } else if (msgType === 'TRAINING_COMPLETED') {
+              this.isTrainingActive = false;
+              this.activeJob = null;
+              this.refreshCheckpoints();
+              this.notify();
+            } else if (msgType === 'TRAINING_STOPPED' || msgType === 'TRAINING_FAILED') {
+              this.isTrainingActive = false;
+              this.notify();
             }
           }
         } catch (err) {
@@ -357,6 +406,99 @@ export class TrainingTelemetryService {
       this.isWsConnected = false;
       this.notify();
     }
+  }
+
+  /**
+   * Triggers background Python RL training job via REST API.
+   */
+  public async startTrainingJob(config: {
+    algorithm: string;
+    scenario: string;
+    timesteps: number;
+    resumeFrom?: string;
+  }): Promise<{ success: boolean; message?: string; error?: string; job?: any }> {
+    try {
+      const res = await fetch('/api/training/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const data = await res.json();
+      if (data.success) {
+        this.isTrainingActive = true;
+        this.activeJob = data.job;
+        this.notify();
+      }
+      return data;
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Network error starting training' };
+    }
+  }
+
+  /**
+   * Stops running Python RL training job via REST API.
+   */
+  public async stopTrainingJob(): Promise<{ success: boolean; message?: string }> {
+    try {
+      const res = await fetch('/api/training/stop', {
+        method: 'POST',
+      });
+      const data = await res.json();
+      this.isTrainingActive = false;
+      this.notify();
+      return data;
+    } catch (err: any) {
+      return { success: false, message: err.message };
+    }
+  }
+
+  /**
+   * Fetches all registered ONNX checkpoints and sidecars from public/models.
+   */
+  public async refreshCheckpoints(): Promise<any[]> {
+    this.isRefreshingCheckpoints = true;
+    this.notify();
+    try {
+      const res = await fetch('/api/checkpoints');
+      if (res.ok) {
+        const data = await res.json();
+        this.checkpoints = data.checkpoints || [];
+      }
+    } catch (e) {
+      console.warn('[TrainingTelemetryService] Failed to fetch checkpoints:', e);
+    } finally {
+      this.isRefreshingCheckpoints = false;
+      this.notify();
+    }
+    return this.checkpoints;
+  }
+
+  /**
+   * Deletes a checkpoint and its sidecar JSON from public/models.
+   */
+  public async deleteCheckpoint(filename: string, deleteSourcePt: boolean = false): Promise<any> {
+    const res = await fetch('/api/checkpoints/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, deleteSourcePt }),
+    });
+    const result = await res.json();
+    await this.refreshCheckpoints();
+    return result;
+  }
+
+  /**
+   * Uploads an ONNX model file directly from the browser.
+   */
+  public async uploadCheckpoint(filename: string, base64Data: string, metadata?: any): Promise<any> {
+    const res = await fetch('/api/checkpoints/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, base64Data, ...metadata }),
+    });
+    const result = await res.json();
+    await this.refreshCheckpoints();
+    return result;
   }
 
   public disconnectWebSocket(): void {

@@ -1,0 +1,12 @@
+{
+  "scenario": "academy_3_vs_1_with_keeper",
+  "algorithm": "MAPPO",
+  "timesteps": 49920,
+  "createdAt": "2026-09-04T13:36:38.156404+00:00",
+  "sourceCheckpoint": "mappo_academy_3_vs_1_with_keeper_trained.pt",
+  "checkpointSha256": "a6a5780f5ac01c924c881ba8155a232f09615043deefc805916c29c7f7e16894",
+  "weightsSha256": "6044e428223c44e19c6367ec49e5afc53a0367219b0cc9b35956169817f7efc8",
+  "obsDim": 127,
+  "actionDim": 19,
+  "hidden": 64
+}

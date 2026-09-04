@@ -602,7 +602,23 @@ export default function App() {
               isModelLoading={isModelLoading}
               modelError={modelError}
               onUpdateTeamLeft={(cfg) => {
-                Object.assign(engine.teamLeftConfig, cfg);
+                if (cfg.controller === 'neural') {
+                  const hasValidOnnx =
+                    trainedAgentRef.current &&
+                    (trainedAgentRef.current.isSessionReady() || trainedAgentRef.current.isValidCheckpoint());
+                  if (!hasValidOnnx) {
+                    setNeuralFallbackActive(true);
+                    setModelError('Neural Model Unavailable – Reverting to Rule-Based');
+                    engine.teamLeftConfig.controller = 'rule_based';
+                  } else {
+                    setNeuralFallbackActive(false);
+                    setModelError(null);
+                    Object.assign(engine.teamLeftConfig, cfg);
+                  }
+                } else {
+                  setNeuralFallbackActive(false);
+                  Object.assign(engine.teamLeftConfig, cfg);
+                }
                 if (cfg.formation) {
                   engine.initDefaultMatch(cfg.formation, engine.teamRightConfig.formation, 11);
                 }
@@ -632,7 +648,17 @@ export default function App() {
 
         {activeTab === 'training' && (
           <div className="space-y-5">
-            <TrainingTelemetryDashboard />
+            <TrainingTelemetryDashboard
+              activeModelPath={trainedAgentRef.current?.activeModelPath}
+              onSelectModel={async (modelPath) => {
+                if (trainedAgentRef.current) {
+                  await trainedAgentRef.current.switchModel(modelPath);
+                  setRenderTrigger((p) => p + 1);
+                }
+              }}
+              stalenessTicks={trainedAgentRef.current?.stalenessTicks || 0}
+              lastInferenceMs={trainedAgentRef.current?.lastInferenceMs || 0}
+            />
             <MultiAgentCreditMatrix
               metrics={agentCreditMetrics}
               selectedPlayerId={engine.controlledPlayerId}

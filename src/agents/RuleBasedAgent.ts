@@ -2,22 +2,34 @@ import { ActionType, AgentAction, Ball, Player, TeamSide, Vector2D } from '../ty
 import { AgentDecisionContext, IAgent } from './BaseAgent';
 import { PITCH } from '../engine/Rules';
 import { Vec2 } from '../engine/Vector';
+import { SeededRNG } from '../engine/SeededRNG';
 
 export class RuleBasedAgent implements IAgent {
   id: string;
   name: string;
   type: 'rule_based' = 'rule_based';
   difficulty: 'easy' | 'medium' | 'hard' | 'master';
+  private rng: SeededRNG;
 
-  constructor(id = 'rule_ai', name = 'Tactical Rule AI', difficulty: 'easy' | 'medium' | 'hard' | 'master' = 'medium') {
+  constructor(
+    id = 'rule_ai',
+    name = 'Tactical Rule AI',
+    difficulty: 'easy' | 'medium' | 'hard' | 'master' = 'medium',
+    seed = 42
+  ) {
     this.id = id;
     this.name = name;
     this.difficulty = difficulty;
+    this.rng = new SeededRNG(seed);
+  }
+
+  public setSeed(seed: number): void {
+    this.rng.setSeed(seed);
   }
 
   decide(context: AgentDecisionContext): AgentAction {
     const { player, ball, teammates, opponents, teamSide, rng } = context;
-    const rnd = rng ? () => rng.next() : Math.random;
+    const rnd = rng ? () => rng.next() : () => this.rng.next();
     const opponentGoalX = teamSide === 'left' ? 1.0 : -1.0;
     const ownGoalX = teamSide === 'left' ? -1.0 : 1.0;
 
@@ -169,14 +181,15 @@ export class RuleBasedAgent implements IAgent {
     ball: Ball,
     teammates: Player[],
     ownGoalX: number,
-    rnd: () => number = Math.random
+    rnd?: () => number
   ): AgentAction {
+    const randomFunc = rnd ?? (() => this.rng.next());
     const ballPos2D: Vector2D = { x: ball.position.x, y: ball.position.y };
 
     if (keeper.hasBall || ball.ownerId === keeper.id) {
       // Distribute to outfield player
       const outfielders = teammates.filter((t) => !t.isGoalkeeper);
-      const target = outfielders[Math.floor(rnd() * outfielders.length)] || outfielders[0];
+      const target = outfielders[Math.floor(randomFunc() * outfielders.length)] || outfielders[0];
       if (target) {
         return {
           type: ActionType.HIGH_PASS,
